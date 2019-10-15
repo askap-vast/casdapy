@@ -267,7 +267,7 @@ def parse_datalink_for_service_and_id(votable, service_name):
 
     # Find the authenticated id token for accessing the image cube
     for x in results_array:
-        if x['service_def'].decode("utf8") == service_name:
+        if x['service_def'].decode("utf8") == service_name and x['description'].decode("utf-8") == "Scripted file access via Web":
             authenticated_id_token = x['authenticated_id_token']
 
     # Find the async url
