@@ -1,8 +1,9 @@
 # Library of useful functions for interacting with the CSIRO ASKAP Science Data Archive
 
 # Author: James Dempsey
-# Origina downloaded from the CSIRO-RDS repo on 2019-10-14
+# Original downloaded from the CSIRO-RDS repo on 2019-10-14
 # https://raw.githubusercontent.com/csiro-rds/casda-samples/a522d3d88df68382990bb1ae09cfe2bf9dfe259f/casda.py
+# Modified by: Andrew O'Brien
 
 from __future__ import print_function, division, unicode_literals
 
@@ -10,6 +11,8 @@ import getpass
 import os
 import re
 import time
+
+from io import BytesIO
 
 from six.moves.urllib.parse import unquote
 
@@ -124,12 +127,11 @@ def create_async_soda_job(authenticated_id_tokens, soda_url=None):
     return resp.url
 
 
-def sync_tap_query(query_string, filename, username=None, password=None,
+def sync_tap_query(query_string, username=None, password=None,
                    file_write_mode='wb', tap_url=None):
     """
     Run an adql (TAP) query, and write the resulting VO Table to a file
     :param query_string: The ADQL query to be run
-    :param filename: The name of the file where the query result should be saved.
     :param username: The OPAL username (if an authenticated query is required)
     :param password: The OPAL password (if an authenticated query is required)
     :param file_write_mode:  A string indicating how the file is to be opened (defaults to wb)
@@ -145,9 +147,7 @@ def sync_tap_query(query_string, filename, username=None, password=None,
     else:
         response = requests.get(sync_url, params=params)
     response.raise_for_status()
-    with open(filename, file_write_mode) as f:
-        f.write(response.content)
-    return filename
+    return response.content
 
 def async_tap_query(query_string, username=None, password=None, destination_dir=None,
                     file_write_mode='wb', tap_url=None):
@@ -198,7 +198,6 @@ def create_async_tap_job(username=None, password=None, tap_url=None):
 def retrieve_direct_data_link_to_file(dataproduct_id,
                                       username, password,
                                       image_cube_datalink_link_url=None,
-                                      destination_dir=None,
                                       file_write_mode='wb'):
     """ Read data link info for a given image cube to a file, returns the filename for this information """
     # Data link url for a given image cube
@@ -209,16 +208,13 @@ def retrieve_direct_data_link_to_file(dataproduct_id,
 
     # Save the data access vo table information to a file: eg C:/temp/datalink-cube-1234.xml
     data = response.content
-    filename = destination_dir + "/datalink-" + dataproduct_id + ".xml"
-    with open(filename, file_write_mode) as f:
-        f.write(data)
-    return filename
+    return data
 
 
 def parse_datalink_for_authenticated_datalink_url(filename):
     """ Parses a datalink file into a vo table, and returns the authenticated datalink url """
     # Parse the datalink file into a vo table, and get the results
-    votable = parse(filename, pedantic=False)
+    votable = parse(BytesIO(filename), pedantic=False)
     results = next(resource for resource in votable.resources if
                    resource.type == "results")
     if results is None:
@@ -238,13 +234,11 @@ def parse_datalink_for_authenticated_datalink_url(filename):
 def retrieve_data_link_to_file(dataproduct_id,
                                username, password,
                                image_cube_datalink_link_url=None,
-                               destination_dir=None,
                                file_write_mode='wb'):
     # 3a) Use datalink (may be secure or unsecure) to get the secure datalink details
     filename = retrieve_direct_data_link_to_file(dataproduct_id, username,
                                                  password,
                                                  image_cube_datalink_link_url=image_cube_datalink_link_url,
-                                                 destination_dir=destination_dir,
                                                  file_write_mode=file_write_mode)
     # If the obscore points to the unsecure datalink, this finds the secure datalink url
     authenticated_datalink_url = parse_datalink_for_authenticated_datalink_url(
@@ -255,16 +249,14 @@ def retrieve_data_link_to_file(dataproduct_id,
         filename = retrieve_direct_data_link_to_file(dataproduct_id, username,
                                                      password,
                                                      image_cube_datalink_link_url=authenticated_datalink_url,
-                                                     destination_dir=destination_dir,
                                                      file_write_mode=file_write_mode)
 
     return filename
 
 
-def parse_datalink_for_service_and_id(filename, service_name):
+def parse_datalink_for_service_and_id(votable, service_name):
     """ Parses a datalink file into a vo table, and returns the async service url and the authenticated id token """
     # Parse the datalink file into a vo table, and get the results
-    votable = parse(filename, pedantic=False)
     results = next(resource for resource in votable.resources if
                    resource.type == "results")
     if results is None:
@@ -295,16 +287,16 @@ def parse_datalink_for_service_and_id(filename, service_name):
 def get_service_link_and_id(dataproduct_id,
                             username, password,
                             image_cube_datalink_link_url=None,
-                            destination_dir=None,
                             file_write_mode='wb',
                             service='cutout_service'):
-    filename = retrieve_data_link_to_file(dataproduct_id,
+
+    votable_data = retrieve_data_link_to_file(dataproduct_id,
                                           username,
                                           password,
                                           image_cube_datalink_link_url=image_cube_datalink_link_url,
-                                          destination_dir=destination_dir,
                                           file_write_mode=file_write_mode)
-    return parse_datalink_for_service_and_id(filename, service)
+    votable = parse(BytesIO(votable_data), pedantic=False)
+    return parse_datalink_for_service_and_id(votable, service)
 
 
 def add_param_to_async_job(job_location, param_key, param_value, verbose=False):
