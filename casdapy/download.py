@@ -9,6 +9,7 @@ import requests
 import pyvo
 from astropy.io import votable
 from astropy.utils.console import human_file_size
+from tqdm import tqdm
 import warnings
 
 
@@ -51,7 +52,7 @@ def main():
     # TODO: more data filters can be applied here, e.g. polarisation
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # ignore votable warnings
-    results = casda_tap_service.search(data_product_id_query)
+        results = casda_tap_service.search(data_product_id_query)
 
     # collect the datalink auth tokens for async download
     download_tokens = []  # list of auth tokens
@@ -59,7 +60,7 @@ def main():
         result._session = session  # manually set the HTTP session to provide auth as pyvo doesn't pass this on
         r = result.getdataset()
         datalinks_votable = votable.parse(BytesIO(r.data))
-        
+
         # get the async_service access URL
         access_url = None
         if access_url is None:  # only do this once, it's not going to change for each result as all results will come from CASDA
@@ -105,16 +106,17 @@ def main():
                 # TODO: check Content-Disposition in header to override filename? I'm not sure when this happens.
                 filesize = int(response.headers.get('Content-Length', 0))  # bytes
                 print(f"Downloading {filename} ({human_file_size(filesize)})")
-                with output_file.open(mode='wb') as fout:
+                with output_file.open(mode='wb') as fout, tqdm(desc=filename, total=filesize, unit="B", unit_scale=True) as pbar:
                     for chunk in response.iter_content(chunk_size=64*1024):
                         fout.write(chunk)
+                        pbar.update(len(chunk))
                 print(f"Downloading {filename} completed.")
-                # TODO add a download progress bar
+                response.close()
         else:
             print("Error encountered in CASDA async job.")
     else:
         print(f"No files to download for SBID {args.sbid}")
-
+    
     # TODO: verify checksums
 if __name__ == "__main__":
     main()
