@@ -13,4 +13,7 @@ setup(
     author_email="obrienan@uwm.edu",
     url="",
     packages=find_packages(),
+    entry_points={
+        "console_scripts": ["casda_download_sbid=casdapy.download:main"],
+    },
 )
