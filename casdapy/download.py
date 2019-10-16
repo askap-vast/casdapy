@@ -9,6 +9,7 @@ import requests
 import pyvo
 from astropy.io import votable
 from astropy.utils.console import human_file_size
+import warnings
 
 
 uws_namespaces = {'uws': 'http://www.ivoa.net/xml/UWS/v1.0'}
@@ -25,6 +26,7 @@ def get_job_result_file_links(job_url):
     results = job_details.find("uws:results", namespaces=uws_namespaces).findall("uws:result", namespaces=uws_namespaces)
     return [unquote(result.get("{http://www.w3.org/1999/xlink}href")) for result in results]
 
+# TODO: logging
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("sbid", help="The ASKAP SBID.")
@@ -47,6 +49,8 @@ def main():
     data_product_id_query = f"SELECT * FROM ivoa.obscore WHERE obs_id = '{args.sbid}' AND dataproduct_type = 'cube' AND dataproduct_subtype = 'cont.restored.t0'"
 
     # TODO: more data filters can be applied here, e.g. polarisation
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # ignore votable warnings
     results = casda_tap_service.search(data_product_id_query)
 
     # collect the datalink auth tokens for async download
@@ -58,7 +62,7 @@ def main():
         
         # get the async_service access URL
         access_url = None
-        if access_url is None:  # only do this once, it's not going to change for each result
+        if access_url is None:  # only do this once, it's not going to change for each result as all results will come from CASDA
             for resource in datalinks_votable.resources:
                 if resource.ID == "async_service":
                     for param in resource.params:
@@ -111,5 +115,6 @@ def main():
     else:
         print(f"No files to download for SBID {args.sbid}")
 
+    # TODO: verify checksums
 if __name__ == "__main__":
     main()
