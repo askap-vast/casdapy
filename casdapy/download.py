@@ -3,7 +3,7 @@ import getpass
 import logging
 from pathlib import Path
 
-from casdapy.query import CasdaSbidImageQuery, CasdaSbidCatalogueQuery
+from casdapy.query import CasdaSbidQuery
 
 logging.basicConfig(format="%(asctime)-15s %(module)s: %(levelname)s %(message)s")
 logger = logging.getLogger("casdapy")
@@ -21,7 +21,7 @@ def main():
             "one must be provided to download images. "
             "Possible choices are: %(choices)s."
         ),
-        choices=CasdaSbidImageQuery.IMAGE_CUBE_SUBTYPES,
+        choices=CasdaSbidQuery._IMAGE_CUBE_SUBTYPES,
     ),
     parser.add_argument(
         "--image-pol",
@@ -43,7 +43,7 @@ def main():
             "least one must be provided to download catalogues. "
             "Possible choices are: %(choices)s."
         ),
-        choices=CasdaSbidCatalogueQuery.CATALOGUE_SUBTYPES,
+        choices=CasdaSbidQuery._CATALOGUE_SUBTYPES,
     )
     parser.add_argument(
         "--credentials-file",
@@ -92,7 +92,7 @@ def main():
         logger.setLevel(logging.INFO)
 
     if args.image_type:
-        casda_query = CasdaSbidImageQuery(
+        casda_query = CasdaSbidQuery(
             args.sbid,
             opal_username,
             opal_password,
@@ -106,7 +106,7 @@ def main():
         )
 
     if args.catalogue_type:
-        casda_query = CasdaSbidCatalogueQuery(
+        casda_query = CasdaSbidQuery(
             args.sbid, opal_username, opal_password, dataproducts=args.catalogue_type
         )
         casda_query.run(
