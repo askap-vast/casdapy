@@ -346,7 +346,9 @@ class CasdaSbidQuery:
             self.logger.error("CASDA async job ended with status %s", job_status)
             return []
 
-    def _download_casda_link(self, link: str, destination: Path, filename: str = None) -> Path:
+    def _download_casda_link(
+        self, link: str, destination: Path, filename: str = None
+    ) -> Path:
         """Download the data file for the given link from CASDA.
 
         Args:
@@ -380,19 +382,16 @@ class CasdaSbidQuery:
         return output_file
 
     def run(
-        self,
-        download_destination: Path,
-        adql_query: str = None,
-        poll_period: int = 30,
-        dry_run: bool = False,
+        self, download_destination: Path, poll_period: int = 30, dry_run: bool = False
     ):
         """Perform the requested ADQL queries and download the matching files.
-        
+
         Args:
             download_destination (Path): download destination.
-            adql_query (str, optional): custom ADQL query. If `None`, one will be constructed for you. Defaults to None.
-            poll_period (int, optional): period to poll CASDA for async job status in seconds. Defaults to 30.
-            dry_run (bool, optional): do not download any files, only perform the queries and log the matching files. Defaults to False.
+            poll_period (int, optional): period to poll CASDA for async job status in
+                seconds. Defaults to 30.
+            dry_run (bool, optional): do not download any files, only perform the queries
+                and log the matching files. Defaults to False.
         """
         do_images = any([x in self._IMAGE_CUBE_SUBTYPES for x in self._dataproducts])
         do_catalogues = any([x in self._CATALOGUE_SUBTYPES for x in self._dataproducts])
