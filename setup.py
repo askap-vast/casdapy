@@ -13,6 +13,9 @@ setup(
     author_email="obrienan@uwm.edu",
     url="",
     packages=find_packages(),
+    package_data={
+        "": ["logger_config.json"],
+    },
     entry_points={
         "console_scripts": ["casda_download_sbid=casdapy.download:main"],
     },
