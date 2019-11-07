@@ -30,7 +30,10 @@ def main():
     )
     logger = logging.getLogger()
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Download images and catalouges from CASDA that match given criteria.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
         "--sbid", type=int, help="Limit results to the given ASKAP SBID"
     )
