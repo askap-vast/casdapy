@@ -20,7 +20,7 @@ class CoordinateAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         ra, dec, radius = values
         coord = SkyCoord(ra=ra, dec=dec, unit="deg")
-        radius = Angle(radius, unit="deg")
+        radius = Angle(radius, unit="arcmin")
         setattr(namespace, self.dest, {"coord": coord, "radius": radius})
 
 
