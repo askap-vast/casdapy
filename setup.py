@@ -14,9 +14,9 @@ setup(
     url="",
     packages=find_packages(),
     package_data={
-        "": ["logger_config.json"],
+        "scripts": ["logger_config.json"],
     },
     entry_points={
-        "console_scripts": ["casda_download_sbid=casdapy.download:main"],
+        "console_scripts": ["casda_download=casdapy.scripts.download:main"],
     },
 )
