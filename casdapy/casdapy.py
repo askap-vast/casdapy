@@ -311,6 +311,8 @@ def query(
             }
         )
 
+    logger.info("sending query to CASDA...")
+    logger.debug("search payload: %s", search_payload)
     response = session.post(DAP_API_SEARCH_URL, json=search_payload)
     try:
         response.raise_for_status()
@@ -389,6 +391,7 @@ def query(
         elif col_type is not None:
             table.replace_column(col.name, col.astype(col_type))
 
+    logger.info("%d files found matching search criteria.", len(table))
     return table
 
 
@@ -419,6 +422,7 @@ def download_data(
     """
     auth_token = _get_auth_token(username, password)
 
+    logger.info("will download %d files from CASDA.", len(data_object_ids))
     response = requests.post(
         DAP_API_DOWNLOAD_URL,
         params={
@@ -479,7 +483,13 @@ def download_data(
                 logger.error("Checksum failed for %s", file)
             else:
                 n_passed += 1
-        logger.debug(
+        if n_passed != len(downloaded_data_files):
+            logger.error(
+                "%d file(s) FAILED checksum verification!",
+                len(downloaded_data_files) - n_passed,
+            )
+        else:
+            logger.info(
             "%d of %d files passed checksum verification.",
             n_passed,
             len(downloaded_data_files),
