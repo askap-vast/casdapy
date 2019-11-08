@@ -8,6 +8,8 @@ from .casdapy import (
     IMAGE_CUBE_POLARISATIONS,
     IMAGE_CUBE_SUBTYPES,
     CATALOGUE_SUBTYPES,
+    CasdaDownloadException,
+    CasdaNoResultsException,
 )
 
 __all__ = [
@@ -18,6 +20,8 @@ __all__ = [
     "IMAGE_CUBE_POLARISATIONS",
     "IMAGE_CUBE_SUBTYPES",
     "CATALOGUE_SUBTYPES",
+    "CasdaDownloadException",
+    "CasdaNoResultsException",
 ]
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())

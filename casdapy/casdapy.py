@@ -40,6 +40,13 @@ class CasdaDownloadException(Exception):
     pass
 
 
+class CasdaNoResultsException(Exception):
+    """No results were found in CASDA for the given query.
+    """
+
+    pass
+
+
 _DAP_API_BASE = "https://data.csiro.au/dap/ws/v2/"
 DAP_API_SEARCH_URL = urljoin(_DAP_API_BASE, "domains/casdaObservation/search")
 DAP_API_DOWNLOAD_URL = urljoin(_DAP_API_BASE, "domains/casdaObservation/download")
@@ -377,9 +384,10 @@ def query(
         "embargoed": None,
         "catalogueType": None,
     }
-    df = pd.concat((df_images, df_catalogues), sort=False, ignore_index=True)[
-        col_types.keys()
-    ]
+    df = pd.concat((df_images, df_catalogues), sort=False, ignore_index=True)
+    if len(df) == 0:
+        raise CasdaNoResultsException("No CASDA results were found.")
+    df = df[col_types.keys()]
     table = Table.from_pandas(df)
     for col in table.itercols():
         col_type = col_types[col.name]
@@ -490,10 +498,10 @@ def download_data(
             )
         else:
             logger.info(
-            "%d of %d files passed checksum verification.",
-            n_passed,
-            len(downloaded_data_files),
-        )
+                "%d of %d files passed checksum verification.",
+                n_passed,
+                len(downloaded_data_files),
+            )
         return downloaded_files
     else:
         raise CasdaDownloadException("CASDA async job failed with status: ERROR.")

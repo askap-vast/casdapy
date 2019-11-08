@@ -157,15 +157,19 @@ def main(
     if verbose:
         logger.setLevel(logging.DEBUG)
 
-    casda_results = casdapy.query(
-        opal_username,
-        opal_password,
-        sbid,
-        cone_search["coord"],
-        cone_search["radius"],
-        polarisations=image_pol,
-        data_products=image_type + catalogue_type,
-    )
+    try:
+        casda_results = casdapy.query(
+            opal_username,
+            opal_password,
+            sbid,
+            cone_search["coord"],
+            cone_search["radius"],
+            polarisations=image_pol,
+            data_products=image_type + catalogue_type,
+        )
+    except casdapy.CasdaNoResultsException as error:
+        logger.warn("%s", error)
+        exit()
 
     if not dry_run:
         _ = casdapy.download_data(
