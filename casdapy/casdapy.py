@@ -24,6 +24,7 @@ class BearerAuth(requests.auth.AuthBase):
     """Authentication class for use with requests. Adds an Authorization header to the
     request with the value "Bearer {token}".
     """
+
     def __init__(self, token):
         self.token = token
 
@@ -35,6 +36,7 @@ class BearerAuth(requests.auth.AuthBase):
 class CasdaDownloadException(Exception):
     """A problem has occurred with a CASDA download.
     """
+
     pass
 
 
@@ -436,13 +438,16 @@ def download_data(
 
     # poll CASDA for async job status, stop when either completed or failed
     job_status = _get_async_job_status(async_job_id)
-    while job_status in ("EXECUTING", "QUEUED", "PENDING"):
+    logger.debug("CASDA async job status: %s", job_status)
+    while job_status not in ("ERROR", "COMPLETED"):
         time.sleep(poll_period)
         job_status = _get_async_job_status(async_job_id)
+        logger.debug("CASDA async job status: %s", job_status)
 
     # when complete, download the requested files (incl checksums)
     downloaded_files: List[Path] = []
-    if job_status != "ERROR":
+    if job_status == "COMPLETED":
+        logger.debug("starting CASDA download...")
         response = requests.get(urljoin(CASDA_DATA_DOWNLOAD_LINKS_URL, async_job_id))
         response.raise_for_status()
         for link in response.text.split():
