@@ -13,6 +13,7 @@
         }
     },
     "root": {
-        "handlers": ["stream"]
+        "handlers": ["stream"],
+        "level": "INFO"
     }
 }
