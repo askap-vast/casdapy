@@ -459,6 +459,7 @@ def download_data(
     # when complete, download the requested files (incl checksums)
     downloaded_files: List[Path] = []
     if job_status == "COMPLETED":
+        time.sleep(poll_period)  # wait a bit more to let CASDA *really* finish
         logger.debug("starting CASDA download...")
         response = requests.get(urljoin(CASDA_DATA_DOWNLOAD_LINKS_URL, async_job_id))
         response.raise_for_status()
