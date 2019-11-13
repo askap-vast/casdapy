@@ -58,9 +58,8 @@ def process_cone_search_args(ctx, param, value):
     help=(
         "The image type(s) to download. Multiple can be given, e.g. --image-type "
         "cont_restored_t0 --image-type cont_restored_t1. At least one must be provided "
-        "to download images. Defaults to cont_restored_t0."
+        "to download images. No deafault."
     ),
-    default=("cont_restored_t0",),
 )
 @click.option(
     "--image-pol",
@@ -79,7 +78,7 @@ def process_cone_search_args(ctx, param, value):
     help=(
         "The catalogue type(s) to download. Multiple can be given, e.g. --catalogue-type "
         "\"Continuum Component\" --catalogue-type \"Continuum Island\". At least one "
-        "must be provided to download catalogues. Defaults to None."
+        "must be provided to download catalogues. No default."
     ),
 )
 @click.option(
