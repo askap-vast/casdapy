@@ -1,4 +1,3 @@
-import argparse
 import getpass
 import json
 import logging
@@ -10,19 +9,6 @@ from astropy.coordinates import SkyCoord, Angle
 import click
 
 import casdapy
-
-
-class CoordinateAction(argparse.Action):
-    """argparse action for handling cone search parameters. Expects three values: ra, dec,
-    and radius. Creates a SkyCoord using ra and dec, and an Angle using radius. Sets the
-    arg dest to a dict with keys "coord" and "radius".
-    """
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        ra, dec, radius = values
-        coord = SkyCoord(ra=ra, dec=dec, unit="deg")
-        radius = Angle(radius, unit="arcmin")
-        setattr(namespace, self.dest, {"coord": coord, "radius": radius})
 
 
 def process_cone_search_args(ctx, param, value):
