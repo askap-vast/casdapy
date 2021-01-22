@@ -111,6 +111,7 @@ def process_cone_search_args(ctx, param, value):
     is_flag=True,
     help="Show more logging information. Useful for debugging. Defaults to False.",
 )
+@click.option("--page-size", type=int, help="Query result page size.", default=500)
 def main(
     sbid,
     project,
@@ -123,9 +124,10 @@ def main(
     poll_period,
     dry_run,
     verbose,
+    page_size,
 ):
     logging.config.dictConfig(LOGGING_CONFIG)
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger("casdapy")
 
     if verbose:
         logger.setLevel(logging.DEBUG)
@@ -142,6 +144,7 @@ def main(
         logger.debug("poll_period: %s (%s)", poll_period, type(poll_period))
         logger.debug("dry_run: %s (%s)", dry_run, type(dry_run))
         logger.debug("verbose: %s (%s)", verbose, type(verbose))
+        logger.debug("page_size: %s (%s)", page_size, type(page_size))
 
     # get the user's OPAL account login
     if credentials_file:
@@ -163,6 +166,7 @@ def main(
             cone_search["radius"],
             polarisations=image_pol,
             data_products=image_type + catalogue_type,
+            page_size=page_size,
         )
     except casdapy.CasdaException as error:
         logger.error(error)

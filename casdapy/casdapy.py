@@ -295,6 +295,7 @@ def query(
     radius: Optional[Angle] = None,
     polarisations: List[str] = IMAGE_CUBE_POLARISATIONS,
     data_products: List[str] = DATAPRODUCT_SUBTYPES,
+    page_size: int = 500,
 ) -> Table:
     """Query CASDA for matching image cubes and catalogues.
 
@@ -347,16 +348,14 @@ def query(
         try:
             project_query = project_dict[project]
         except KeyError:
-            logger.error("Project %s is not in the list of valid CASDA projects.", project)
+            logger.error(
+                "Project %s is not in the list of valid CASDA projects.", project
+            )
             logger.error("Available projects: %s", " ".join(project_dict.keys()))
             raise CasdaException("Project not found.")
 
-    search_payload = {
+    search_payload: Dict[str, Any] = {
         "facets": [{"label": "Collection Types", "values": ["observational"]}],
-        "dataProducts": [
-            {"dataProduct": "IMAGE_CUBE", "page": 1, "pageSize": 500},
-            {"dataProduct": "CATALOGUE", "page": 1, "pageSize": 500},
-        ],
     }
     if sbid:
         search_payload.update({"schedulingBlockId": sbid})
@@ -375,21 +374,81 @@ def query(
     if project_query:
         search_payload.update({"project": project_query})
 
+    results_image_files = []
+    results_image_ancillary_files = []
+    results_catalogue_files = []
+    page = 1
     logger.info("sending query to CASDA...")
-    logger.debug("search payload: %s", search_payload)
-    response = session.post(DAP_API_SEARCH_URL, json=search_payload)
-    try:
-        response.raise_for_status()
-    except requests.exceptions.HTTPError as error:
-        logger.error("HTTP error encountered when sending query to CASDA: %s", error)
-        raise
+    while page > 0:
+        search_payload.update(
+            {
+                "dataProducts": [
+                    {
+                        "dataProduct": "IMAGE_CUBE",
+                        "page": page,
+                        "pageSize": page_size,
+                        "sortOrder": "ASC",
+                        "sortBy": "filename",
+                    },
+                    {
+                        "dataProduct": "IMAGE_CUBE_ANCILLARY",
+                        "page": page,
+                        "pageSize": page_size,
+                        "sortOrder": "ASC",
+                        "sortBy": "filename",
+                    },
+                    {
+                        "dataProduct": "CATALOGUE",
+                        "page": page,
+                        "pageSize": page_size,
+                        "sortOrder": "ASC",
+                        "sortBy": "filename",
+                    },
+                ]
+            }
+        )
+        logger.debug("search payload page %d: %s", page, search_payload)
+        response = session.post(DAP_API_SEARCH_URL, json=search_payload)
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as error:
+            logger.error(
+                "HTTP error encountered when sending query to CASDA: %s", error
+            )
+            raise
+
+        page_results_image_files = response.json()["imageCubeResultDto"]["files"]
+        page_results_image_ancillary_files = response.json()[
+            "imageCubeAncillaryResultDto"
+        ]["files"]
+        page_results_catalogue_files = response.json()["catalogueResultDto"]["files"]
+
+        results_image_files.extend(page_results_image_files)
+        results_image_ancillary_files.extend(page_results_image_ancillary_files)
+        results_catalogue_files.extend(page_results_catalogue_files)
+
+        if (
+            sum(
+                [
+                    len(page_results_catalogue_files),
+                    len(page_results_image_ancillary_files),
+                    len(page_results_image_files),
+                ]
+            )
+            == 0
+        ):
+            page = -1  # stop paging
+            logger.debug("stopped paging.")
+        else:
+            page += 1
+
+    # merge image and ancillary image results - they have the same columns
+    results_image_all_files = results_image_files + results_image_ancillary_files
+
+    df_images = pd.DataFrame(data=results_image_all_files)
+    df_catalogues = pd.DataFrame(data=results_catalogue_files)
 
     # get results matching coord and apply filters
-    results_images = response.json()["imageCubeResultDto"]
-    results_catalogues = response.json()["catalogueResultDto"]
-    df_images = pd.DataFrame(data=results_images["files"])
-    df_catalogues = pd.DataFrame(data=results_catalogues["files"])
-
     if len(df_images) > 0:
         logger.debug(
             "%d images found in cone search (before filtering by type, pol, etc)",
