@@ -3,8 +3,9 @@ from functools import partial
 import hashlib
 import logging
 from pathlib import Path, PurePath
+import re
 import time
-from typing import List, NewType, Optional, Collection, Tuple, ByteString
+from typing import Any, List, NewType, Optional, Collection, Tuple, ByteString, Dict
 from urllib.parse import urlsplit, urljoin
 from xml.etree import ElementTree
 
@@ -33,16 +34,18 @@ class BearerAuth(requests.auth.AuthBase):
         return r
 
 
-class CasdaDownloadException(Exception):
-    """A problem has occurred with a CASDA download.
-    """
+class CasdaException(Exception):
+    pass
+
+
+class CasdaDownloadException(CasdaException):
+    """A problem has occurred with a CASDA download."""
 
     pass
 
 
-class CasdaNoResultsException(Exception):
-    """No results were found in CASDA for the given query.
-    """
+class CasdaNoResultsException(CasdaException):
+    """No results were found in CASDA for the given query."""
 
     pass
 
@@ -50,6 +53,7 @@ class CasdaNoResultsException(Exception):
 _DAP_API_BASE = "https://data.csiro.au/dap/ws/v2/"
 DAP_API_SEARCH_URL = urljoin(_DAP_API_BASE, "domains/casdaObservation/search")
 DAP_API_DOWNLOAD_URL = urljoin(_DAP_API_BASE, "domains/casdaObservation/download")
+DAP_API_FIELDS_URL = urljoin(_DAP_API_BASE, "domains/casdaObservation/fields")
 _DAP_REST_USERNAME = "DAP_UI_User@DAPPrd"
 _DAP_REST_PASSWORD = ""
 DAP_TOKEN_URL = "https://data.csiro.au/dap/oauth/token"
@@ -204,9 +208,11 @@ def verify_casda_checksum(data_file: Path, checksum_file: Path = None) -> bool:
     data_crc, data_digest, data_file_size = calculate_casda_checksum(data_file)
     if checksum_file is None:
         checksum_file = Path(data_file.parent, data_file.name + ".checksum")
-    _checksum_crc, _checksum_digest, _checksum_file_size = (
-        checksum_file.read_text().split()
-    )
+    (
+        _checksum_crc,
+        _checksum_digest,
+        _checksum_file_size,
+    ) = checksum_file.read_text().split()
 
     # convert checksum crc and size from hex to int, decode binary digest
     checksum_crc = int(_checksum_crc, 16)
@@ -247,10 +253,44 @@ def calculate_casda_checksum(data_file: Path) -> Tuple[int, ByteString, int]:
     return crc, sha1.digest(), file_size
 
 
+def get_casda_projects(
+    session: Optional[requests.Session] = None,
+) -> Dict[str, str]:
+    if session is None:
+        session = requests.Session()
+    response = session.get(DAP_API_FIELDS_URL)
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as error:
+        logger.error(
+            "HTTP error encountered while requesting project codes from CASDA: %s",
+            error,
+        )
+        raise
+
+    fields = response.json()["fields"]
+    raw_project_list: List[str] = []
+    for field in fields:
+        if field["label"] == "Project":
+            raw_project_list = field["values"]
+
+    # filter invalid projects, CASDA requires project queries to be in the format
+    # "<code> - <title>" but some returned by the fields endpoint violate this requirement!
+    project_dict: Dict[str, str] = {}
+    pattern = re.compile(r"(?P<code>.+) - (?P<title>.+)")
+    for project in raw_project_list:
+        match = pattern.fullmatch(project)
+        if match is not None:
+            code, title = match.groups()
+            project_dict[code] = match.group()
+    return project_dict
+
+
 def query(
     username: str,
     password: str,
     sbid: Optional[int] = None,
+    project: Optional[str] = None,
     coord: Optional[SkyCoord] = None,
     radius: Optional[Angle] = None,
     polarisations: List[str] = IMAGE_CUBE_POLARISATIONS,
@@ -263,6 +303,9 @@ def query(
         password (str): ATNF OPAL account password.
         sbid (Optional[int], optional): Search for data products with this SBID only.
             Defaults to None.
+        project (Optional[str], optional): Search for data products for this project
+            only, e.g. AS110. A preliminary query will be made to check if the given
+            project ID is available. Defaults to None.
         coord (Optional[SkyCoord], optional): Search for data products around this
             coordinate only. If specified, must also provide `radius`. Defaults to None.
         radius (Optional[Angle], optional): Radius for the cone search around `coord`.
@@ -274,8 +317,9 @@ def query(
             product types only. Defaults to DATAPRODUCT_SUBTYPES, i.e. all types.
 
     Raises:
-        ValueError: when supplied polarisations or data_products are not recognised.
-        ValueError: when a coord is given but a radius is not, and vice-versa.
+        CasdaException: when supplied polarisations or data_products are not recognised.
+        CasdaException: when a coord is given but a radius is not, and vice-versa.
+        CasdaException: when the given project code is not available.
 
     Returns:
         astropy.table.Table: image cube and catalogue details that match the query
@@ -283,18 +327,29 @@ def query(
     """
     # validate args
     if not set(polarisations) <= set(IMAGE_CUBE_POLARISATIONS):
-        raise ValueError(
+        raise CasdaException(
             f"polarisations must be one or more of the following: {IMAGE_CUBE_POLARISATIONS}"
         )
     if not set(data_products) <= set(DATAPRODUCT_SUBTYPES):
-        raise ValueError(
+        raise CasdaException(
             f"data_products must be one or more of the following: {DATAPRODUCT_SUBTYPES}"
         )
     if (coord is not None) ^ (radius is not None):
-        raise ValueError("Both a coord and radius must be given, or neither.")
+        raise CasdaException("Both a coord and radius must be given, or neither.")
 
     session = requests.Session()
     session.auth = (username, password)
+
+    # validate project if given
+    project_query = None
+    if project:
+        project_dict = get_casda_projects(session)
+        try:
+            project_query = project_dict[project]
+        except KeyError:
+            logger.error("Project %s is not in the list of valid CASDA projects.", project)
+            logger.error("Available projects: %s", " ".join(project_dict.keys()))
+            raise CasdaException("Project not found.")
 
     search_payload = {
         "facets": [{"label": "Collection Types", "values": ["observational"]}],
@@ -317,6 +372,8 @@ def query(
                 ]
             }
         )
+    if project_query:
+        search_payload.update({"project": project_query})
 
     logger.info("sending query to CASDA...")
     logger.debug("search payload: %s", search_payload)
@@ -365,7 +422,7 @@ def query(
     #   Tuple[astropy object, kwargs for constructor] to pass column into, or
     #   type to pass to column.astype, or
     #   None to do nothing except keep the column in the table
-    col_types = {
+    col_types: Dict[str, Any] = {
         "dataObjectId": None,
         "filename": None,
         "fileSize": u.byte,

@@ -22,6 +22,7 @@ def process_cone_search_args(ctx, param, value):
 
 @click.command()
 @click.option("--sbid", type=int, help="Limit results to the given ASKAP SBID")
+@click.option("--project", help="Limit results to the given project code, e.g. AS110.")
 @click.option(
     "--cone-search",
     nargs=3,
@@ -55,7 +56,7 @@ def process_cone_search_args(ctx, param, value):
         "Image polarisation product(s) to download. Multiple can be given, e.g. "
         "--image-pol I --image-pol V. Defaults to I."
     ),
-    default=("I",)
+    default=("I",),
 )
 @click.option(
     "--catalogue-type",
@@ -63,7 +64,7 @@ def process_cone_search_args(ctx, param, value):
     multiple=True,
     help=(
         "The catalogue type(s) to download. Multiple can be given, e.g. --catalogue-type "
-        "\"Continuum Component\" --catalogue-type \"Continuum Island\". At least one "
+        '"Continuum Component" --catalogue-type "Continuum Island". At least one '
         "must be provided to download catalogues. No default."
     ),
 )
@@ -103,6 +104,7 @@ def process_cone_search_args(ctx, param, value):
 )
 def main(
     sbid,
+    project,
     cone_search,
     image_type,
     image_pol,
@@ -126,7 +128,9 @@ def main(
         logger.debug("image_type: %s (%s)", image_type, type(image_type))
         logger.debug("image_pol: %s (%s)", image_pol, type(image_pol))
         logger.debug("catalogue_type: %s (%s)", catalogue_type, type(catalogue_type))
-        logger.debug("credentials_file: %s (%s)", credentials_file, type(credentials_file))
+        logger.debug(
+            "credentials_file: %s (%s)", credentials_file, type(credentials_file)
+        )
         logger.debug("destination_dir: %s (%s)", destination_dir, type(destination_dir))
         logger.debug("poll_period: %s (%s)", poll_period, type(poll_period))
         logger.debug("dry_run: %s (%s)", dry_run, type(dry_run))
@@ -147,14 +151,15 @@ def main(
             opal_username,
             opal_password,
             sbid,
+            project,
             cone_search["coord"],
             cone_search["radius"],
             polarisations=image_pol,
             data_products=image_type + catalogue_type,
         )
-    except casdapy.CasdaNoResultsException as error:
-        logger.warn("%s", error)
-        exit()
+    except casdapy.CasdaException as error:
+        logger.error(error)
+        raise SystemExit()
 
     if not dry_run:
         _ = casdapy.download_data(
