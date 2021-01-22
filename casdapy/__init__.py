@@ -1,5 +1,3 @@
-import logging
-
 from .casdapy import (
     query,
     download_data,
@@ -25,5 +23,3 @@ __all__ = [
     "CasdaDownloadException",
     "CasdaNoResultsException",
 ]
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())

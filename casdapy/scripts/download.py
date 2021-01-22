@@ -1,14 +1,23 @@
 import getpass
-import json
 import logging
 import logging.config
 from pathlib import Path
-import pkg_resources
 
 from astropy.coordinates import SkyCoord, Angle
 import click
 
 import casdapy
+
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {"format": "%(asctime)-15s %(module)s: %(levelname)s %(message)s"}
+    },
+    "handlers": {"stream": {"class": "logging.StreamHandler", "formatter": "default"}},
+    "root": {"handlers": ["stream"], "level": "INFO"},
+}
 
 
 def process_cone_search_args(ctx, param, value):
@@ -115,10 +124,8 @@ def main(
     dry_run,
     verbose,
 ):
-    logging.config.dictConfig(
-        json.loads(pkg_resources.resource_string(__name__, "logger_config.json"))
-    )
-    logger = logging.getLogger()
+    logging.config.dictConfig(LOGGING_CONFIG)
+    logger = logging.getLogger(__name__)
 
     if verbose:
         logger.setLevel(logging.DEBUG)
