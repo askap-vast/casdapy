@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "casdapy"
+version = "0.1.1"
+description = "Query and download images and catalogues from the CSIRO ASKAP Science Data Archive (CASDA)."
+authors = ["Andrew O'Brien <obrienan@uwm.edu>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+astropy = "^4.2"
+astroquery = "^0.4.1"
+click = "^7.1.2"
+PyPika = "^0.47.4"
+
+[tool.poetry.dev-dependencies]
+black = "^20.8b1"
+mypy = "^0.800"
+flake8 = "^3.8.4"
+
+[tool.poetry.scripts]
+casda_download = "casdapy.download_cli:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
