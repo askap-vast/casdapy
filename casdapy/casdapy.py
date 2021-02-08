@@ -42,6 +42,20 @@ AdqlIntersects = pypika.CustomFunction("INTERSECTS", ["region1", "region2"])
 
 
 def chunks(seq: Sequence, n: int) -> Iterable:
+    """Yield chunks of at least length `n` from `seq` until exhausted.
+
+    Parameters
+    ----------
+    seq : Sequence
+        A sequence, e.g. a List.
+    n : int
+        The maximum number of elements per chunk. All chunks except the last should
+        contain `n` elements.
+
+    Yields
+    -------
+    Iterator[Iterable]
+    """
     for i in range(0, len(seq), n):
         yield seq[i : i + n]  # noqa: E203
 
@@ -50,13 +64,18 @@ def verify_casda_checksum(data_file: Path, checksum_file: Path = None) -> bool:
     """Verify the integrity of a data file downloaded from CASDA with its provided
     checksum file.
 
-    Args:
-        data_file (Path): The data file to verify.
-        checksum_file (Path, optional): The checksum file for `data_file`. If None, uses
-            `data_file`.checksum. Defaults to None.
+    Parameters
+    ----------
+    data_file : Path
+        The data file to verify.
+    checksum_file : Path, optional
+        The checksum file for `data_file`. If None, uses `data_file`.checksum. By
+        default None.
 
-    Returns:
-        bool: the calculated checksum for `data_file` matches the checksum file.
+    Returns
+    -------
+    bool
+        The calculated checksum for `data_file` matches the checksum file.
     """
     data_crc, data_digest, data_file_size = calculate_casda_checksum(data_file)
     if checksum_file is None:
@@ -82,11 +101,15 @@ def verify_casda_checksum(data_file: Path, checksum_file: Path = None) -> bool:
 def calculate_casda_checksum(data_file: Path) -> Tuple[int, ByteString, int]:
     """Calculate the CASDA checksum for a data file.
 
-    Args:
-        data_file (Path): Data file for which to calculate the CASDA checksum.
+    Parameters
+    ----------
+    data_file : Path
+        Data file for which to calculate the CASDA checksum.
 
-    Returns:
-        Tuple[int, ByteString, int]: The CASDA checksum: (CRC, SHA-1 digest, file size in bytes)
+    Returns
+    -------
+    Tuple[int, ByteString, int]
+        The CASDA checksum: (CRC, SHA-1 digest, file size in bytes)
     """
     crc = 0
     sha1 = hashlib.sha1()
@@ -116,28 +139,41 @@ def query(
 ) -> Table:
     """Query CASDA for matching image cubes and catalogues.
 
-    Args:
-        project (Optional[str], optional): Search for data products with this OPAL
-            project code only, e.g. "AS110" for RACS. Defaults to None.
-        sbid (Optional[int], optional): Search for data products with this SBID only.
-            Defaults to None.
-        coord (Optional[SkyCoord], optional): Search for data products around this
-            coordinate only. If specified, must also provide `radius`. Defaults to None.
-        radius (Optional[Angle], optional): Radius for the cone search around `coord`.
-            Must be specified if `coord` is given. Defaults to None.
-        polarisations (List[str], optional): Filter image cube results that contain
-            these polarisations only. Filtering catalogues by polarisation currently not
-            supported. Defaults to IMAGE_CUBE_POLARISATIONS, i.e. all Stokes parameters.
-        data_products (List[str], optional): Filter results that match these data
-            product types only. Defaults to DATAPRODUCT_SUBTYPES, i.e. all types.
+    Parameters
+    ----------
+    project : Optional[str], optional
+        Search for data products with this OPAL project code only, e.g. "AS110" for
+        RACS, by default None.
+    sbid : Optional[int], optional
+        Search for data products with this SBID only, by default None.
+    coord : Optional[SkyCoord], optional
+        Search for data products that intersect with a circle at position `coord` with
+        radius `radius`. If specified, must also provide `radius`. By default None.
+    radius : Optional[Angle], optional
+        Radius for the cone search around `coord`. Must be specified if `coord` is
+        given. By default None.
+    polarisations : List[str], optional
+        Search for image cubes that contain these polarisations only. Filtering
+        catalogues by polarisation currently not supported. By default all Stokes
+        parameters (I, Q, U, V).
+    data_products : List[str], optional
+        Search for these data product types only. By default all types. See
+        `DATAPRODUCT_SUBTYPES`.
 
-    Raises:
-        ValueError: when supplied polarisations or data_products are not recognised.
-        ValueError: when a coord is given but a radius is not, and vice-versa.
+    Returns
+    -------
+    Table
+        Image cube and catalogue details that match the query parameters. Pass the
+        "dataObjectId" column values to `download_data` to download.
 
-    Returns:
-        astropy.table.Table: image cube and catalogue details that match the query
-            parameters. Pass the "dataObjectId" column values to `download_data` to download.
+    Raises
+    ------
+    ValueError
+        One or more of the given `polarisations` is not recognised.
+    ValueError
+        One or more of the given `data_products` is not recognised.
+    ValueError
+        If `coord` is supplied, `radius` must also be supplied and vice-versa.
     """
     # validate args
     if not set(polarisations) <= set(IMAGE_CUBE_POLARISATIONS):
@@ -198,16 +234,38 @@ def query(
     return r
 
 
-def download_catalogue_data(catalogue_filename: str, destination: Path) -> Path:
+def download_catalogue_data(
+    catalogue_filename: str, destination: Path, is_component: bool = True
+) -> Path:
+    """Download VOTable catalogues from CASDA with TAP.
+
+    Parameters
+    ----------
+    catalogue_filename : str
+        Filename from CASDA.
+    destination : Path
+        Location to save catalogue. Must be a directory.
+    is_component : bool, optional
+        True if this is a component catalogue, False for an island catalogue. By default
+        True.
+
+    Returns
+    -------
+    Path
+        The local path to the downloaded file.
+    """
     casdatap = TapPlus(url=CASDA_TAP_URL, verbose=False)
-    component_table, catalogue_table = pypika.Tables(
-        "casda.continuum_component", "casda.catalogue"
+    catalogue_table = pypika.Table("casda.catalogue")
+    data_table = (
+        pypika.Table("casda.continuum_component")
+        if is_component
+        else pypika.Table("casda.continuum_island")
     )
     adql_query = (
-        pypika.Query.from_(component_table)
-        .select(component_table.star)
+        pypika.Query.from_(data_table)
+        .select(data_table.star)
         .join(catalogue_table)
-        .on(component_table.catalogue_id == catalogue_table.id)
+        .on(data_table.catalogue_id == catalogue_table.id)
         .where(catalogue_table.filename == catalogue_filename)
     )
     adql_query_str = adql_query.get_sql(quote_char=None)
@@ -232,21 +290,27 @@ def download_image_data(
 ) -> Tuple[List[Path], List[Path]]:
     """Download image cube data products from CASDA.
 
-    Args:
-        casda_tap_query_result (Table): the Table of query results returned by CASDA to
-            be downloaded. i.e. the output of `casdapy.casdapy.query`. Must contain the
-            `access_url` column.
-        destination (Path): download destination directory.
-        username (str): ATNF OPAL account username.
-        password (str): ATNF OPAL account password.
-        job_size (int, optional): the number of files in each CASDA job. Note the actual
-            number of downloaded files will be 2*N as CASDA always provides a small
-            .checksum file for each requested file. Defaults to 20.
+    Parameters
+    ----------
+    casda_tap_query_result : Table
+        The Table of query results returned by CASDA to be downloaded. i.e. the output
+        of `casdapy.casdapy.query`. Must contain the `access_url` column.
+    destination : Path
+        Download destination directory.
+    username : str
+        ATNF OPAL account username.
+    password : str
+        ATNF OPAL account password.
+    job_size : int, optional
+        The number of files in each CASDA job. Note the actual number of downloaded
+        files will be 2*N as CASDA always provides a small .checksum file for each
+        requested file. By default 20.
 
-    Returns:
-        Tuple[List[Path], List[Path]]: tuple containing the list of downloaded file
-            paths that passed checksum verification, and the list of paths that failed
-            checksum verification.
+    Returns
+    -------
+    Tuple[List[Path], List[Path]]
+        The list of downloaded file paths that passed checksum verification, and the
+        list of paths that failed checksum verification.
     """
     casda = astroquery.casda.Casda(username, password)
 
@@ -278,7 +342,6 @@ def download_image_data(
             i + 1,
             n_jobs,
         )
-        logger.debug("%s", subset[["access_url", "filename"]])
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", VOTableSpecWarning)
             url_list = casda.stage_data(subset, verbose=True)

@@ -12,7 +12,7 @@ from casdapy import casdapy, logger
 
 
 class ClickPathPath(click.Path):
-    """A click path argument that returns a pathlib Path, not a string"""
+    """A click path argument that returns a pathlib Path instead of a string."""
 
     def convert(self, value, param, ctx):
         return Path(super().convert(value, param, ctx))
@@ -182,10 +182,15 @@ def main(
         logger.info(
             "Downloading %d catalogues with TAP ...", len(casda_results_catalogues)
         )
-        for catalogue_filename in casda_results_catalogues["filename"]:
-            logger.debug("Downloading catalogue %s with TAP ...", catalogue_filename)
-            _ = casdapy.download_catalogue_data(catalogue_filename, destination_dir)
-            logger.debug("Download completed for %s.", catalogue_filename)
+        for catalogue in casda_results_catalogues:
+            is_component = catalogue["dataproduct_subtype"] == "catalogue.continuum.component"
+            logger.debug("Downloading catalogue %s with TAP ...", catalogue["filename"])
+            _ = casdapy.download_catalogue_data(
+                catalogue["filename"],
+                destination_dir,
+                is_component=is_component,
+            )
+            logger.debug("Download completed for %s.", catalogue["filename"])
         logger.info(
             "Catalogue downloads completed. Output directory: %s", destination_dir
         )

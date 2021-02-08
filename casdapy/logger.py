@@ -4,8 +4,14 @@ from astropy.logger import log as astropy_logger
 
 
 class StreamHandler(logging.StreamHandler):
+    """StreamHandler that prints colour log records. Essentially the same as
+    `astropy.logger.StreamHandler` but retains the logging.StreamHandler format
+    compatibility (the former enforces a fixed log message format).
+    """
+
     def emit(self, record):
         from astropy.utils.console import color_print
+
         stream = sys.stdout if record.levelno <= logging.INFO else sys.stderr
         message = self.format(record)
         if record.levelno < logging.INFO:
@@ -20,7 +26,17 @@ class StreamHandler(logging.StreamHandler):
 
 
 def _init_log() -> logging.Logger:
-    logging_format = "%(asctime)-15s %(levelname)-8s %(message)s [%(origin)s:%(funcName)s]"
+    """Initialise the logger, which is `astropy.logger.log` with the default
+    StreamHandler replaced with `casdapy.logger.StreamHandler`. Called when the
+    `casdapy` module is loaded.
+
+    Returns
+    -------
+    logging.Logger
+    """
+    logging_format = (
+        "%(asctime)-15s %(levelname)-8s %(message)s [%(origin)s:%(funcName)s]"
+    )
     # hijack the astropy logger and set our own format
     logger = astropy_logger
     handler = StreamHandler()
