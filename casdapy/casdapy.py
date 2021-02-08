@@ -288,7 +288,7 @@ def download_image_data(
     password: str,
     job_size: int = 20,
 ) -> Tuple[List[Path], List[Path]]:
-    """Download image cube data products from CASDA.
+    """Download and verify image cube data products from CASDA.
 
     Parameters
     ----------
@@ -333,8 +333,7 @@ def download_image_data(
     )
     if n_jobs >= 10:
         logger.info("Brace your inbox!")
-    downloaded_valid_files: List[Path] = []
-    downloaded_invalid_files: List[Path] = []
+
     for i, subset in enumerate(chunks(casda_tap_query_result_images, job_size)):
         logger.info(
             "Staging %d files for download for CASDA job #%d of %d ...",
@@ -348,33 +347,83 @@ def download_image_data(
         logger.info("Staging complete for CASDA job #%d of %d.", i + 1, n_jobs)
 
         logger.info("Downloading files for CASDA job #%d of %d ...", i + 1, n_jobs)
-        downloaded_job_files = [
-            Path(f) for f in casda.download_files(url_list, savedir=str(destination))
-        ]
+        downloaded_job_files = download_staged_data_urls(
+            url_list, username, password, destination
+        )
         logger.info("Download complete for CASDA job #%d of %d.", i + 1, n_jobs)
 
         # verify the checksums (should be downloaded automatically)
         logger.info(
             "Verifying downloaded files for CASDA job #%d of %d ...", i + 1, n_jobs
         )
-        downloaded_job_data_files = [
-            f for f in downloaded_job_files if f.suffix != ".checksum"
-        ]
-        for file in downloaded_job_data_files:
-            checksum_passed = verify_casda_checksum(file)
-            if checksum_passed:
-                downloaded_valid_files.append(file)
-            else:
-                logger.error("Checksum failed for %s", file)
-                downloaded_invalid_files.append(file)
-        if len(downloaded_valid_files) != len(downloaded_job_data_files):
-            logger.error(
-                "%d file(s) FAILED checksum verification.",
-                len(downloaded_job_data_files) - len(downloaded_valid_files),
-            )
-        logger.info(
-            "%d of %d files passed checksum verification.",
-            len(downloaded_valid_files),
-            len(downloaded_job_data_files),
+        downloaded_valid_files, downloaded_invalid_files = verify_downloaded_data(
+            downloaded_job_files
         )
+    return downloaded_valid_files, downloaded_invalid_files
+
+
+def download_staged_data_urls(
+    url_list: List[str], username: str, password: str, destination: Path
+) -> List[Path]:
+    """Download the staged CASDA file URLs.
+
+    Parameters
+    ----------
+    url_list : List[str]
+        List of URLs for data files staged by CASDA. i.e. the output of
+        `astroquery.casda.stage_data`.
+    username : str
+        ATNF OPAL username. Must be the same credentials used to create the CASDA job.
+    password : str
+        ATNF OPAL password. Must be the same credentials used to create the CASDA job.
+    destination : Path
+        Download destination path.
+
+    Returns
+    -------
+    List[Path]
+        List of `Path` objects for the downloaded files.
+    """
+    casda = astroquery.casda.Casda(username, password)
+    downloaded_job_files = [
+        Path(f) for f in casda.download_files(url_list, savedir=str(destination))
+    ]
+    return downloaded_job_files
+
+
+def verify_downloaded_data(path_list: List[Path]) -> Tuple[List[Path], List[Path]]:
+    """Verify data files downloaded from CASDA using the supplied checksum files. The
+    checksum files are assumed to be located alongside the data files.
+
+    Parameters
+    ----------
+    path_list : List[Path]
+        List of `Path` objects. Files with suffix ".checksum" will be ignored.
+
+    Returns
+    -------
+    Tuple[List[Path], List[Path]]
+        A list of `Path` objects that passed verification, and a list of `Path` objects
+        that failed.
+    """
+    downloaded_job_data_files = [f for f in path_list if f.suffix != ".checksum"]
+    downloaded_valid_files: List[Path] = []
+    downloaded_invalid_files: List[Path] = []
+    for file in downloaded_job_data_files:
+        checksum_passed = verify_casda_checksum(file)
+        if checksum_passed:
+            downloaded_valid_files.append(file)
+        else:
+            logger.error("Checksum failed for %s", file)
+            downloaded_invalid_files.append(file)
+    if len(downloaded_valid_files) != len(downloaded_job_data_files):
+        logger.error(
+            "%d file(s) FAILED checksum verification.",
+            len(downloaded_job_data_files) - len(downloaded_valid_files),
+        )
+    logger.info(
+        "%d of %d files passed checksum verification.",
+        len(downloaded_valid_files),
+        len(downloaded_job_data_files),
+    )
     return downloaded_valid_files, downloaded_invalid_files

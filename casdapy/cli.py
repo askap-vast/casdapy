@@ -2,10 +2,13 @@ import getpass
 import logging
 import logging.config
 from pathlib import Path
+from typing import Optional, Tuple, TextIO, Union
+from urllib.parse import unquote
 
 from astropy.coordinates import SkyCoord, Angle
 from astropy.utils.console import human_file_size
 import astropy.units as u
+from astroquery.casda import Casda
 import click
 
 from casdapy import casdapy, logger
@@ -27,7 +30,51 @@ def process_cone_search_args(ctx, param, value):
     return {"coord": coord, "radius": radius}
 
 
-@click.command()
+def _get_auth(credentials_file: Optional[Union[Path, TextIO]]) -> Tuple[str, str]:
+    """Read a username and password from a text file or ask the user interactively.
+
+    Parameters
+    ----------
+    credentials_file : Optional[Union[Path, TextIO]]
+        Either a `Path` to a local file containing the ATNF OPAL username and password on
+        separate lines; or an open file pointer to such a file; or `None`. If `None`, ask
+        the user interactively.
+
+    Returns
+    -------
+    Tuple[str, str]
+        ATNF OPAL username, password.
+    """
+    if credentials_file:
+        if isinstance(credentials_file, Path):
+            fp = credentials_file.open()
+        else:
+            fp = credentials_file
+        opal_username, opal_password, *_ = fp.read().split("\n")
+    else:
+        opal_username = input("ATNF OPAL username: ")
+        opal_password = getpass.getpass("ATNF OPAL password: ")
+    return opal_username, opal_password
+
+
+@click.group()
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Show more logging information. Useful for debugging. Defaults to False.",
+)
+def cli(verbose: bool = False):
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+
+
+@cli.command(
+    help=(
+        "Query CASDA for files matching various search criteria and download the"
+        " results."
+    ),
+    short_help="Query CASDA and download results.",
+)
 @click.option(
     "--project", type=str, help="Limit results to the given ASKAP OPAL project code."
 )
@@ -127,12 +174,7 @@ def process_cone_search_args(ctx, param, value):
         " *would* be downloaded. Defaults to False."
     ),
 )
-@click.option(
-    "--verbose",
-    is_flag=True,
-    help="Show more logging information. Useful for debugging. Defaults to False.",
-)
-def main(
+def download(
     project,
     sbid,
     cone_search,
@@ -144,11 +186,7 @@ def main(
     job_size,
     checksum_fail_mode,
     dry_run,
-    verbose,
 ):
-    if verbose:
-        logger.setLevel(logging.DEBUG)
-
     casda_results = casdapy.query(
         project,
         sbid,
@@ -183,7 +221,9 @@ def main(
             "Downloading %d catalogues with TAP ...", len(casda_results_catalogues)
         )
         for catalogue in casda_results_catalogues:
-            is_component = catalogue["dataproduct_subtype"] == "catalogue.continuum.component"
+            is_component = (
+                catalogue["dataproduct_subtype"] == "catalogue.continuum.component"
+            )
             logger.debug("Downloading catalogue %s with TAP ...", catalogue["filename"])
             _ = casdapy.download_catalogue_data(
                 catalogue["filename"],
@@ -235,5 +275,95 @@ def main(
     logger.info("Finished!")
 
 
-if __name__ == "__main__":
-    main()
+@cli.command(
+    help=(
+        "Verify files downloaded from CASDA by calculating their checksums and"
+        " comparing them with the .checksum files provided by CASDA. Assumes the"
+        " .checksum files are in the same location as the data files."
+    ),
+    short_help="Verify CASDA download checksums.",
+)
+@click.argument("files", type=ClickPathPath(exists=True, dir_okay=False), nargs=-1)
+@click.option(
+    "--delete", is_flag=True, help="Delete files that fail checksum verification."
+)
+@click.option(
+    "--show-full-path",
+    is_flag=True,
+    help=(
+        "Print the full relative path for files in log messages. Default is to print"
+        " the filename only."
+    ),
+)
+def verify(files: Tuple[Path], delete: bool, show_full_path: bool):
+    for f in files:
+        f_log_str = str(f) if show_full_path else f.name
+        if f.suffix == ".checksum":
+            logger.debug("Skipping checksum file %s", f_log_str)
+            continue
+        f_checksum = f.with_name(f.name + ".checksum")
+        if not f_checksum.exists():
+            logger.warning("No checksum file found for %s", f_log_str)
+        else:
+            passed = casdapy.verify_casda_checksum(f, f_checksum)
+            if passed:
+                logger.debug("PASSED: %s", f_log_str)
+            else:
+                logger.error("FAILED: %s", f_log_str)
+                if delete:
+                    logger.debug("Deleting %s and checksum file.", f_log_str)
+                    f.unlink()
+                    f_checksum.unlink()
+
+
+@cli.command(
+    help=(
+        "Retry downloading files from an existing CASDA job. Existing and completed"
+        " files will be ignored, existing but incomplete files will be resumed if"
+        " possible. A file is considered completed if is has the expected filesize, so"
+        " users should delete corrupted data files if they wish to retry downloading"
+        " them."
+    ),
+    short_help="Download files from an existing CASDA job.",
+)
+@click.argument("job-id")
+@click.option(
+    "--destination-dir",
+    type=ClickPathPath(exists=True, file_okay=False, writable=True),
+    help="Directory to save downloaded images. Defaults to current directory.",
+    default=".",
+)
+@click.option(
+    "--credentials-file",
+    type=click.File("r"),
+    help=(
+        "Read ATNF OPAL account credentials from a file containing the username"
+        " and password on separate lines. If not supplied, user will be prompted to"
+        " enter a username and password interactively."
+    ),
+)
+def retry(
+    job_id: str,
+    destination_dir: Path,
+    credentials_file: Optional[TextIO],
+):
+    job_url = Casda._get_soda_url() + "/" + job_id
+    job_details = Casda._get_job_details_xml(job_url)
+    status = Casda._read_job_status(job_details, verbose=True)
+    if status != "COMPLETED":
+        logger.error(
+            "CASDA job %s has status %s and is not ready for download.", job_id, status
+        )
+    else:
+        opal_username, opal_password = _get_auth(credentials_file)
+        url_list = [
+            unquote(result.get("{http://www.w3.org/1999/xlink}href"))
+            for result in job_details.find("uws:results", Casda._uws_ns).findall(
+                "uws:result", Casda._uws_ns
+            )
+        ]
+        logger.info("Downloading files for CASDA job %s ...", job_id)
+        _ = casdapy.download_staged_data_urls(
+            url_list, opal_username, opal_password, destination_dir
+        )
+        logger.info("Download complete.")
