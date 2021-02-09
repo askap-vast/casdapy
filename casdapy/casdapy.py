@@ -1,8 +1,10 @@
 import binascii
 from functools import partial
 import hashlib
+from http.client import HTTPException
 from math import ceil
 from pathlib import Path
+from time import sleep
 from typing import List, Optional, Tuple, ByteString, Iterable, Sequence
 import warnings
 
@@ -36,7 +38,8 @@ IMAGE_CUBE_SUBTYPES = [
 ]
 IMAGE_CUBE_POLARISATIONS = ["I", "Q", "U", "V"]
 DATAPRODUCT_SUBTYPES = IMAGE_CUBE_SUBTYPES + CATALOGUE_SUBTYPES
-# logger = logging.getLogger(__name__)
+MAX_RETRY_TIMEOUT = 30  # max seconds to wait between catalogue download retries
+
 AdqlCircle = pypika.CustomFunction("CIRCLE", ["coord_system", "ra", "dec", "radius"])
 AdqlIntersects = pypika.CustomFunction("INTERSECTS", ["region1", "region2"])
 
@@ -235,7 +238,10 @@ def query(
 
 
 def download_catalogue_data(
-    catalogue_filename: str, destination: Path, is_component: bool = True
+    catalogue_filename: str,
+    destination: Path,
+    is_component: bool = True,
+    retries: int = 1,
 ) -> Path:
     """Download VOTable catalogues from CASDA with TAP.
 
@@ -248,6 +254,8 @@ def download_catalogue_data(
     is_component : bool, optional
         True if this is a component catalogue, False for an island catalogue. By default
         True.
+    retries : int, optional
+        Maximum number of download retries if an HTTP error is encountered. By default 1.
 
     Returns
     -------
@@ -273,7 +281,41 @@ def download_catalogue_data(
         warnings.simplefilter("ignore", VOTableChangeWarning)
         warnings.simplefilter("ignore", VOTableSpecWarning)
         job = casdatap.launch_job_async(adql_query_str)
-    results = job.get_results()
+        logger.debug(
+            "TAP query async job for %s completed. Job ID %s. Fetching results ...",
+            catalogue_filename,
+            job.jobid,
+        )
+    # get the catalogue, retrying with exponential backoff if there is an HTTP error
+    for attempt_n in range(retries):
+        try:
+            if attempt_n > 0:
+                logger.debug(
+                    "Attempt %d to download %s job ID %s",
+                    attempt_n + 1,
+                    catalogue_filename,
+                    job.jobid,
+                )
+            results = job.get_results()
+            break
+        except HTTPException:
+            timeout = min(2 ** attempt_n, MAX_RETRY_TIMEOUT)
+            logger.warning(
+                "Download for %s job ID %s failed, retrying after %d sec ... ",
+                catalogue_filename,
+                job.jobid,
+                timeout,
+            )
+            sleep(timeout)
+    else:
+        # all download attempts failed
+        logger.error(
+            "Reached limit of %d retries for downloading %s job ID %s. Aborting.",
+            retries,
+            catalogue_filename,
+            job.jobid,
+        )
+        raise
     output_file = destination / catalogue_filename
     if output_file.exists():
         logger.warning("Overwriting existing file %s", output_file)

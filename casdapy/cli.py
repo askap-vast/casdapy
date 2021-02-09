@@ -155,6 +155,16 @@ def cli(verbose: bool = False):
     ),
 )
 @click.option(
+    "--catalogue-retries",
+    type=int,
+    default=5,
+    metavar="N",
+    help=(
+        "If an error occurs when downloading a requested catalogue, retry the download"
+        " a maximum of N times with exponential backoff."
+    ),
+)
+@click.option(
     "--checksum-fail-mode",
     type=click.Choice(["log", "delete"]),
     help=(
@@ -184,6 +194,7 @@ def download(
     credentials_file,
     destination_dir: Path,
     job_size,
+    catalogue_retries,
     checksum_fail_mode,
     dry_run,
 ):
@@ -229,6 +240,7 @@ def download(
                 catalogue["filename"],
                 destination_dir,
                 is_component=is_component,
+                retries=catalogue_retries,
             )
             logger.debug("Download completed for %s.", catalogue["filename"])
         logger.info(
