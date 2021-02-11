@@ -10,6 +10,7 @@ from astropy.utils.console import human_file_size
 import astropy.units as u
 from astroquery.casda import Casda
 import click
+import requests
 
 from casdapy import casdapy, logger
 
@@ -375,7 +376,16 @@ def retry(
             )
         ]
         logger.info("Downloading files for CASDA job %s ...", job_id)
-        _ = casdapy.download_staged_data_urls(
-            url_list, opal_username, opal_password, destination_dir
-        )
+        try:
+            _ = casdapy.download_staged_data_urls(
+                url_list, opal_username, opal_password, destination_dir
+            )
+        except requests.exceptions.HTTPError as e:
+            logger.error("A HTTPError was raised.")
+            logger.error("request.url: %s", e.request.url)
+            logger.error("request.header: %s", e.request.headers)
+            logger.error("request.body: %s", e.request.body)
+            logger.error("response.status_code: %s", e.response.status_code)
+            logger.error("response.headers: %s", e.response.headers)
+            raise
         logger.info("Download complete.")

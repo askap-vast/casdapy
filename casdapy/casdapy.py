@@ -4,7 +4,6 @@ import hashlib
 from http.client import HTTPException
 from math import ceil
 from pathlib import Path
-from time import sleep
 from typing import List, Optional, Tuple, ByteString, Iterable, Sequence
 import warnings
 
@@ -14,6 +13,8 @@ from astropy.table import Table
 import astroquery.casda
 from astroquery.utils.tap.core import TapPlus
 import pypika
+import requests.exceptions
+from retrying import retry
 from casdapy import logger
 
 CASDA_TAP_URL = "https://casda.csiro.au/casda_vo_tools/tap"
@@ -38,10 +39,18 @@ IMAGE_CUBE_SUBTYPES = [
 ]
 IMAGE_CUBE_POLARISATIONS = ["I", "Q", "U", "V"]
 DATAPRODUCT_SUBTYPES = IMAGE_CUBE_SUBTYPES + CATALOGUE_SUBTYPES
-MAX_RETRY_TIMEOUT = 30  # max seconds to wait between catalogue download retries
+MAX_RETRIES = 30  # max number of retries for functions decorated with @retry
 
 AdqlCircle = pypika.CustomFunction("CIRCLE", ["coord_system", "ra", "dec", "radius"])
 AdqlIntersects = pypika.CustomFunction("INTERSECTS", ["region1", "region2"])
+
+
+def _retry_if_connection_error(exception):
+    return isinstance(exception, requests.exceptions.ConnectionError)
+
+
+def _retry_if_http_error(exception):
+    return isinstance(exception, HTTPException)
 
 
 def chunks(seq: Sequence, n: int) -> Iterable:
@@ -287,31 +296,13 @@ def download_catalogue_data(
             job.jobid,
         )
     # get the catalogue, retrying with exponential backoff if there is an HTTP error
-    for attempt_n in range(retries):
-        try:
-            if attempt_n > 0:
-                logger.debug(
-                    "Attempt %d to download %s job ID %s",
-                    attempt_n + 1,
-                    catalogue_filename,
-                    job.jobid,
-                )
-            results = job.get_results()
-            break
-        except HTTPException:
-            timeout = min(2 ** attempt_n, MAX_RETRY_TIMEOUT)
-            logger.warning(
-                "Download for %s job ID %s failed, retrying after %d sec ... ",
-                catalogue_filename,
-                job.jobid,
-                timeout,
-            )
-            sleep(timeout)
-    else:
-        # all download attempts failed
+    try:
+        results = get_casda_tap_result(job, catalogue_filename)
+    except HTTPException:
+        # all download retry attempts failed
         logger.error(
             "Reached limit of %d retries for downloading %s job ID %s. Aborting.",
-            retries,
+            MAX_RETRIES,
             catalogue_filename,
             job.jobid,
         )
@@ -321,6 +312,24 @@ def download_catalogue_data(
         logger.warning("Overwriting existing file %s", output_file)
     results.write(str(output_file), format="votable", overwrite=True)
     return output_file
+
+
+@retry(
+    retry_on_exception=_retry_if_http_error,
+    wait_exponential_multiplier=1000,
+    wait_exponential_max=30000,
+    stop_max_attempt_number=MAX_RETRIES,
+)
+def get_casda_tap_result(
+    job: astroquery.utils.tap.model.job.Job, catalogue_filename: str
+):
+    logger.debug(
+        "Attempting to download %s job ID %s",
+        catalogue_filename,
+        job.jobid,
+    )
+    results = job.get_results()
+    return results
 
 
 def download_image_data(
@@ -389,9 +398,18 @@ def download_image_data(
         logger.info("Staging complete for CASDA job #%d of %d.", i + 1, n_jobs)
 
         logger.info("Downloading files for CASDA job #%d of %d ...", i + 1, n_jobs)
-        downloaded_job_files = download_staged_data_urls(
-            url_list, username, password, destination
-        )
+        try:
+            downloaded_job_files = download_staged_data_urls(
+                url_list, username, password, destination, casda=casda
+            )
+        except requests.exceptions.ConnectionError:
+            logger.error(
+                "Reached limit of %d retries for downloading files for CASDA job #%d of"
+                " %d. Aborting.",
+                MAX_RETRIES,
+                i + 1,
+                n_jobs,
+            )
         logger.info("Download complete for CASDA job #%d of %d.", i + 1, n_jobs)
 
         # verify the checksums (should be downloaded automatically)
@@ -404,8 +422,18 @@ def download_image_data(
     return downloaded_valid_files, downloaded_invalid_files
 
 
+@retry(
+    retry_on_exception=_retry_if_connection_error,
+    wait_exponential_multiplier=1000,
+    wait_exponential_max=30000,
+    stop_max_attempt_number=MAX_RETRIES,
+)
 def download_staged_data_urls(
-    url_list: List[str], username: str, password: str, destination: Path
+    url_list: List[str],
+    username: str,
+    password: str,
+    destination: Path,
+    casda: Optional[astroquery.casda.CasdaClass] = None,
 ) -> List[Path]:
     """Download the staged CASDA file URLs.
 
@@ -420,13 +448,17 @@ def download_staged_data_urls(
         ATNF OPAL password. Must be the same credentials used to create the CASDA job.
     destination : Path
         Download destination path.
+    casda : astroquery.casda.CasdaClass, optional
+        An instance of `CasdaClass`. If present, will use this instance to interact with
+        CASDA, otherwise a new instance will be created using the given credentials.
 
     Returns
     -------
     List[Path]
         List of `Path` objects for the downloaded files.
     """
-    casda = astroquery.casda.Casda(username, password)
+    if casda is None:
+        casda = astroquery.casda.Casda(username, password)
     downloaded_job_files = [
         Path(f) for f in casda.download_files(url_list, savedir=str(destination))
     ]
