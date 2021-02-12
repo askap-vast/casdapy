@@ -126,6 +126,17 @@ def cli(verbose: bool = False):
     ),
 )
 @click.option(
+    "--filenames-file",
+    type=click.File("r"),
+    help=(
+        "Only download files with filenames specified in the given file. Each filename"
+        " must be on separate lines. If using filenames from previous CASDA URLs, note"
+        " that the filename in the URL has some special characters replaced, e.g. "
+        " 2333+18A becomes 2333_18A. The filename stored in the CASDA database is the "
+        " original, e.g. 2333+18A."
+    ),
+)
+@click.option(
     "--credentials-file",
     type=click.File("r"),
     help=(
@@ -192,6 +203,7 @@ def download(
     image_type,
     image_pol,
     catalogue_type,
+    filenames_file,
     credentials_file,
     destination_dir: Path,
     job_size,
@@ -199,6 +211,7 @@ def download(
     checksum_fail_mode,
     dry_run,
 ):
+    filenames = [line.strip() for line in filenames_file.readlines()] if filenames_file else None
     casda_results = casdapy.query(
         project,
         sbid,
@@ -206,6 +219,7 @@ def download(
         cone_search["radius"],
         polarisations=image_pol,
         data_products=image_type + catalogue_type,
+        filenames=filenames,
     )
     if len(casda_results) == 0:
         logger.warning("No results returned by CASDA.")

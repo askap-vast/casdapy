@@ -148,6 +148,7 @@ def query(
     radius: Optional[Angle] = None,
     polarisations: List[str] = IMAGE_CUBE_POLARISATIONS,
     data_products: List[str] = DATAPRODUCT_SUBTYPES,
+    filenames: List[str] = None,
 ) -> Table:
     """Query CASDA for matching image cubes and catalogues.
 
@@ -171,6 +172,8 @@ def query(
     data_products : List[str], optional
         Search for these data product types only. By default all types. See
         `DATAPRODUCT_SUBTYPES`.
+    filenames : List[str], optional
+        Download results with the given filenames only.
 
     Returns
     -------
@@ -225,6 +228,9 @@ def query(
                 obscore_table.s_region,
             )
         )
+
+    if filenames:
+        adql_query = adql_query.where(obscore_table.filename.isin(filenames))
 
     adql_query = adql_query.where(obscore_table.dataproduct_subtype.isin(data_products))
     # only the image cubes have pol_states, filtering by polarisation is not directly
