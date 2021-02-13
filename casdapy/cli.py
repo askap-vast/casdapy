@@ -13,6 +13,7 @@ import click
 import requests
 
 from casdapy import casdapy, logger
+from casdapy.logging import debug_http_on
 
 
 class ClickPathPath(click.Path):
@@ -60,13 +61,21 @@ def _get_auth(credentials_file: Optional[Union[Path, TextIO]]) -> Tuple[str, str
 
 @click.group()
 @click.option(
+    "-v",
     "--verbose",
-    is_flag=True,
-    help="Show more logging information. Useful for debugging. Defaults to False.",
+    count=True,
+    help=(
+        "Show more detailed logging information which is useful for debugging. Can be"
+        " used multiple times to increase the level of verbosity. i.e. -v will turn on"
+        " debug logging for casdapy logging; -vv will also turn on debug logging for"
+        " all HTTP requests."
+    ),
 )
-def cli(verbose: bool = False):
-    if verbose:
+def cli(verbose: int = 0):
+    if verbose > 0:
         logger.setLevel(logging.DEBUG)
+    if verbose > 1:
+        debug_http_on()
 
 
 @cli.command(
@@ -211,7 +220,11 @@ def download(
     checksum_fail_mode,
     dry_run,
 ):
-    filenames = [line.strip() for line in filenames_file.readlines()] if filenames_file else None
+    filenames = (
+        [line.strip() for line in filenames_file.readlines()]
+        if filenames_file
+        else None
+    )
     casda_results = casdapy.query(
         project,
         sbid,

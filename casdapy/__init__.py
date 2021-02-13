@@ -1,3 +1,3 @@
-from .logger import _init_log
+from .logging import _init_log
 
 logger = _init_log()

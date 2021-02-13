@@ -1,6 +1,7 @@
 import logging
 import sys
 from astropy.logger import log as astropy_logger
+from http.client import HTTPConnection
 
 
 class StreamHandler(logging.StreamHandler):
@@ -44,3 +45,17 @@ def _init_log() -> logging.Logger:
     logger.removeHandler(logger.handlers[0])
     logger.addHandler(handler)
     return logger
+
+
+def debug_http_on():
+    HTTPConnection.debuglevel = 1
+    requests_log = logging.getLogger("requests.packages.urllib3")
+    requests_log.setLevel(logging.DEBUG)
+    requests_log.propagate = True
+
+
+def debug_http_off():
+    HTTPConnection.debuglevel = 0
+    requests_log = logging.getLogger("requests.packages.urllib3")
+    requests_log.setLevel(logging.WARNING)
+    requests_log.propagate = False
