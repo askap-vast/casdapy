@@ -3,6 +3,7 @@ from functools import partial
 import hashlib
 from http.client import HTTPException
 from math import ceil
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple, ByteString, Iterable, Sequence
 import warnings
@@ -10,11 +11,15 @@ import warnings
 from astropy.coordinates import SkyCoord, Angle
 from astropy.io.votable.exceptions import VOTableChangeWarning, VOTableSpecWarning
 from astropy.table import Table
+from astropy.utils.console import human_file_size
+import astropy.utils.data
 import astroquery.casda
 from astroquery.utils.tap.core import TapPlus
 import pypika
 import requests.exceptions
 from retrying import retry
+from tqdm.auto import tqdm
+
 from casdapy import logger
 
 CASDA_TAP_URL = "https://casda.csiro.au/casda_vo_tools/tap"
@@ -43,6 +48,90 @@ MAX_RETRIES = 30  # max number of retries for functions decorated with @retry
 
 AdqlCircle = pypika.CustomFunction("CIRCLE", ["coord_system", "ra", "dec", "radius"])
 AdqlIntersects = pypika.CustomFunction("INTERSECTS", ["region1", "region2"])
+
+
+class CasdaClass(astroquery.casda.CasdaClass):
+    def download_files(self, urls, savedir=None):
+        filenames = []
+        for url in urls:
+            local_filename = url.split("/")[-1]
+            if os.name == "nt":
+                # Windows doesn't allow special characters in filenames like
+                # ":" so replace them with an underscore
+                local_filename = local_filename.replace(":", "_")
+            local_filepath = os.path.join(savedir or ".", local_filename)
+
+            with self._session.get(
+                url, timeout=self.TIMEOUT, stream=True, allow_redirects=True
+            ) as response:
+                response.raise_for_status()
+                if "content-length" in response.headers:
+                    length = int(response.headers["content-length"])
+                    if length == 0:
+                        logger.warning("URL %s has length=0.", url)
+                else:
+                    logger.warning("URL %s did not return a Content-Length.", url)
+                    length = None
+                accepts_ranges = "Accept-Ranges" in response.headers
+
+            headers = None
+            existing_file_length = 0
+            if os.path.exists(local_filepath) and accepts_ranges:
+                # file exists locally and the server accepts byte range requests
+                open_mode = "ab"
+                existing_file_length = os.stat(local_filepath).st_size
+                if length is not None and existing_file_length >= length:
+                    # file exists and appears to be complete based on expected size
+                    # move on to the next file URL
+                    logger.info(
+                        "Found cached file %s with expected size %s",
+                        local_filepath,
+                        human_file_size(existing_file_length),
+                    )
+                    filenames.append(local_filepath)
+                    continue  # next URL
+                elif existing_file_length == 0:
+                    # file exists but appears empty
+                    logger.info("Found cached file %s with size 0", local_filepath)
+                    open_mode = "wb"
+                else:
+                    # file exists but is incomplete, request the remaining byte range
+                    logger.info(
+                        "Continuing download of file %s with %s to go (%.2f%%)",
+                        local_filepath,
+                        human_file_size(length - existing_file_length),
+                        (length - existing_file_length) / length * 100,
+                    )
+                    end = f"{length-1}" if length is not None else ""
+                    headers = {"Range": f"bytes={existing_file_length}-{end}"}
+            else:
+                # file doesn't exist locally
+                open_mode = "wb"
+
+            with self._session.get(
+                url,
+                timeout=self.TIMEOUT,
+                stream=True,
+                allow_redirects=True,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                logger.info("Downloading %s ...", url)
+                with tqdm.wrapattr(
+                    open(local_filepath, open_mode),
+                    "write",
+                    total=length,
+                    initial=existing_file_length,
+                    miniters=1,
+                    unit="B",
+                    unit_scale=True,
+                ) as f:
+                    blocksize = astropy.utils.data.conf.download_block_size
+                    for block in response.iter_content(blocksize):
+                        f.write(block)
+            filenames.append(local_filepath)
+
+        return filenames
 
 
 def _retry_if_connection_error(exception):
@@ -369,7 +458,7 @@ def download_image_data(
         The list of downloaded file paths that passed checksum verification, and the
         list of paths that failed checksum verification.
     """
-    casda = astroquery.casda.Casda(username, password)
+    casda = CasdaClass(username, password)
 
     # ensure only image cubes are being downloaded - catalogues won't work with this method
     casda_tap_query_result_images = casda_tap_query_result[
@@ -464,7 +553,8 @@ def download_staged_data_urls(
         List of `Path` objects for the downloaded files.
     """
     if casda is None:
-        casda = astroquery.casda.Casda(username, password)
+        casda = CasdaClass(username, password)
+
     downloaded_job_files = [
         Path(f) for f in casda.download_files(url_list, savedir=str(destination))
     ]
