@@ -129,6 +129,15 @@ class CasdaClass(astroquery.casda.CasdaClass):
                     blocksize = astropy.utils.data.conf.download_block_size
                     for block in response.iter_content(blocksize):
                         f.write(block)
+                # check final filesize
+                filesize = os.stat(local_filepath).st_size
+                if filesize < length:
+                    logger.error(
+                        "File %s appears incomplete with size %s < expected size %s",
+                        human_file_size(filesize),
+                        human_file_size(length),
+                    )
+                    # TODO raise exception and retry
             filenames.append(local_filepath)
 
         return filenames
