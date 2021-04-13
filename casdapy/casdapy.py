@@ -134,6 +134,7 @@ class CasdaClass(astroquery.casda.CasdaClass):
                 if filesize < length:
                     logger.error(
                         "File %s appears incomplete with size %s < expected size %s",
+                        local_filepath,
                         human_file_size(filesize),
                         human_file_size(length),
                     )
