@@ -20,7 +20,7 @@ import requests.exceptions
 from retrying import retry
 from tqdm.auto import tqdm
 
-from casdapy import logger
+from casdapy._logging import logger
 
 CASDA_TAP_URL = "https://casda.csiro.au/casda_vo_tools/tap"
 CATALOGUE_SUBTYPES = ["catalogue.continuum.island", "catalogue.continuum.component"]

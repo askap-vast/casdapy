@@ -59,3 +59,6 @@ def debug_http_off():
     requests_log = logging.getLogger("requests.packages.urllib3")
     requests_log.setLevel(logging.WARNING)
     requests_log.propagate = False
+
+
+logger = _init_log()

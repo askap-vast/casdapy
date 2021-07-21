@@ -1,19 +1,20 @@
 import getpass
 import logging
-import logging.config
+# import logging.config
 from pathlib import Path
 from typing import Optional, Tuple, TextIO, Union
 from urllib.parse import unquote
 
 from astropy.coordinates import SkyCoord, Angle
+from astropy.table import Table
 from astropy.utils.console import human_file_size
 import astropy.units as u
 from astroquery.casda import Casda
 import click
 import requests
 
-from casdapy import casdapy, logger
-from casdapy.logging import debug_http_on
+from casdapy import casda
+from casdapy._logging import debug_http_on, logger
 
 
 class ClickPathPath(click.Path):
@@ -106,7 +107,7 @@ def cli(verbose: int = 0):
 )
 @click.option(
     "--image-type",
-    type=click.Choice(casdapy.IMAGE_CUBE_SUBTYPES, case_sensitive=False),
+    type=click.Choice(casda.IMAGE_CUBE_SUBTYPES, case_sensitive=False),
     multiple=True,
     help=(
         "The image type(s) to download. Multiple can be given, e.g. --image-type"
@@ -116,7 +117,7 @@ def cli(verbose: int = 0):
 )
 @click.option(
     "--image-pol",
-    type=click.Choice(casdapy.IMAGE_CUBE_POLARISATIONS, case_sensitive=False),
+    type=click.Choice(casda.IMAGE_CUBE_POLARISATIONS, case_sensitive=False),
     multiple=True,
     help=(
         "Image polarisation product(s) to download. Multiple can be given, e.g."
@@ -126,7 +127,7 @@ def cli(verbose: int = 0):
 )
 @click.option(
     "--catalogue-type",
-    type=click.Choice(casdapy.CATALOGUE_SUBTYPES, case_sensitive=False),
+    type=click.Choice(casda.CATALOGUE_SUBTYPES, case_sensitive=False),
     multiple=True,
     help=(
         "The catalogue type(s) to download. Multiple can be given, e.g."
@@ -225,7 +226,7 @@ def download(
         if filenames_file
         else None
     )
-    casda_results = casdapy.query(
+    casda_results = casda.query(
         project,
         sbid,
         cone_search["coord"],
@@ -283,7 +284,7 @@ def download(
         else:
             opal_username = input("ATNF OPAL username: ")
             opal_password = getpass.getpass("ATNF OPAL password: ")
-        images_good, images_bad = casdapy.download_image_data(
+        images_good, images_bad = casda.download_image_data(
             casda_results_images,
             Path(destination_dir),
             opal_username,
@@ -345,7 +346,7 @@ def verify(files: Tuple[Path], delete: bool, show_full_path: bool):
         if not f_checksum.exists():
             logger.warning("No checksum file found for %s", f_log_str)
         else:
-            passed = casdapy.verify_casda_checksum(f, f_checksum)
+            passed = casda.verify_casda_checksum(f, f_checksum)
             if passed:
                 logger.debug("PASSED: %s", f_log_str)
             else:
@@ -404,7 +405,7 @@ def retry(
         ]
         logger.info("Downloading files for CASDA job %s ...", job_id)
         try:
-            _ = casdapy.download_staged_data_urls(
+            _ = casda.download_staged_data_urls(
                 url_list, opal_username, opal_password, destination_dir
             )
         except requests.exceptions.HTTPError as e:
@@ -416,3 +417,7 @@ def retry(
             logger.error("response.headers: %s", e.response.headers)
             raise
         logger.info("Download complete.")
+
+
+if __name__ == "__main__":
+    cli()
