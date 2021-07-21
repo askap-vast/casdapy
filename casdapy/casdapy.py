@@ -129,6 +129,7 @@ class CasdaClass(astroquery.casda.CasdaClass):
                     blocksize = astropy.utils.data.conf.download_block_size
                     for block in response.iter_content(blocksize):
                         f.write(block)
+                    f.close()
                 # check final filesize
                 filesize = os.stat(local_filepath).st_size
                 if filesize < length:
