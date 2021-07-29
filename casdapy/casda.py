@@ -6,6 +6,7 @@ from math import ceil
 import os
 from pathlib import Path
 from typing import List, Optional, Tuple, ByteString, Iterable, Sequence
+from urllib.parse import unquote
 import warnings
 
 from astropy.coordinates import SkyCoord, Angle
@@ -51,6 +52,7 @@ AdqlIntersects = pypika.CustomFunction("INTERSECTS", ["region1", "region2"])
 
 
 class CasdaClass(astroquery.casda.CasdaClass):
+    # override to add retrying and error detection to the download
     def download_files(self, urls, savedir=None):
         filenames = []
         for url in urls:
@@ -66,7 +68,7 @@ class CasdaClass(astroquery.casda.CasdaClass):
             ) as response:
                 response.raise_for_status()
                 if "content-length" in response.headers:
-                    length = int(response.headers["content-length"])
+                    length: Optional[int] = int(response.headers["content-length"])
                     if length == 0:
                         logger.warning("URL %s has length=0.", url)
                 else:
@@ -80,30 +82,31 @@ class CasdaClass(astroquery.casda.CasdaClass):
                 # file exists locally and the server accepts byte range requests
                 open_mode = "ab"
                 existing_file_length = os.stat(local_filepath).st_size
-                if length is not None and existing_file_length >= length:
-                    # file exists and appears to be complete based on expected size
-                    # move on to the next file URL
-                    logger.info(
-                        "Found cached file %s with expected size %s",
-                        local_filepath,
-                        human_file_size(existing_file_length),
-                    )
-                    filenames.append(local_filepath)
-                    continue  # next URL
-                elif existing_file_length == 0:
-                    # file exists but appears empty
-                    logger.info("Found cached file %s with size 0", local_filepath)
-                    open_mode = "wb"
-                else:
-                    # file exists but is incomplete, request the remaining byte range
-                    logger.info(
-                        "Continuing download of file %s with %s to go (%.2f%%)",
-                        local_filepath,
-                        human_file_size(length - existing_file_length),
-                        (length - existing_file_length) / length * 100,
-                    )
-                    end = f"{length-1}" if length is not None else ""
-                    headers = {"Range": f"bytes={existing_file_length}-{end}"}
+                if length is not None:
+                    if existing_file_length >= length:
+                        # file exists and appears to be complete based on expected size
+                        # move on to the next file URL
+                        logger.info(
+                            "Found cached file %s with expected size %s",
+                            local_filepath,
+                            human_file_size(existing_file_length),
+                        )
+                        filenames.append(local_filepath)
+                        continue  # next URL
+                    elif existing_file_length == 0:
+                        # file exists but appears empty
+                        logger.info("Found cached file %s with size 0", local_filepath)
+                        open_mode = "wb"
+                    else:
+                        # file exists but is incomplete, request the remaining byte range
+                        logger.info(
+                            "Continuing download of file %s with %s to go (%.2f%%)",
+                            local_filepath,
+                            human_file_size(length - existing_file_length),
+                            (length - existing_file_length) / length * 100,
+                        )
+                        end = f"{length-1}" if length is not None else ""
+                        headers = {"Range": f"bytes={existing_file_length}-{end}"}
             else:
                 # file doesn't exist locally
                 open_mode = "wb"
@@ -132,7 +135,7 @@ class CasdaClass(astroquery.casda.CasdaClass):
                     f.close()
                 # check final filesize
                 filesize = os.stat(local_filepath).st_size
-                if filesize < length:
+                if length is not None and filesize < length:
                     logger.error(
                         "File %s appears incomplete with size %s < expected size %s",
                         local_filepath,
@@ -143,6 +146,55 @@ class CasdaClass(astroquery.casda.CasdaClass):
             filenames.append(local_filepath)
 
         return filenames
+
+    # override to add service_name kwarg to allow catalogue downloads in addition to images
+    def stage_data(self, table, verbose=False, service_name="cutout_service"):
+        if not self._authenticated:
+            raise ValueError(
+                "Credentials must be supplied to download CASDA image data"
+            )
+
+        if table is None or len(table) == 0:
+            return []
+
+        # Use datalink to get authenticated access for each file
+        tokens = []
+        for row in table:
+            access_url = row["access_url"]
+            response = self._request(
+                "GET", access_url, auth=self._auth, timeout=self.TIMEOUT, cache=False
+            )
+            response.raise_for_status()
+            soda_url, id_token = self._parse_datalink_for_service_and_id(
+                response, service_name
+            )
+            tokens.append(id_token)
+
+        # Create job to stage all files
+        job_url = self._create_soda_job(tokens, soda_url=soda_url)
+        if verbose:
+            logger.info("Created data staging job " + job_url)
+
+        # Wait for job to be complete
+        final_status = self._run_job(job_url, verbose, poll_interval=self.POLL_INTERVAL)
+        if final_status != "COMPLETED":
+            if verbose:
+                logger.info("Job ended with status " + final_status)
+            raise ValueError(
+                "Data staging job did not complete successfully. Status was "
+                + final_status
+            )
+
+        # Build list of result file urls
+        job_details = self._get_job_details_xml(job_url)
+        fileurls = []
+        for result in job_details.find("uws:results", self._uws_ns).findall(
+            "uws:result", self._uws_ns
+        ):
+            file_location = unquote(result.get("{http://www.w3.org/1999/xlink}href"))
+            fileurls.append(file_location)
+
+        return fileurls
 
 
 def _retry_if_connection_error(exception):
@@ -352,74 +404,6 @@ def query(
     return r
 
 
-def download_catalogue_data(
-    catalogue_filename: str,
-    destination: Path,
-    is_component: bool = True,
-    retries: int = 1,
-) -> Path:
-    """Download VOTable catalogues from CASDA with TAP.
-
-    Parameters
-    ----------
-    catalogue_filename : str
-        Filename from CASDA.
-    destination : Path
-        Location to save catalogue. Must be a directory.
-    is_component : bool, optional
-        True if this is a component catalogue, False for an island catalogue. By default
-        True.
-    retries : int, optional
-        Maximum number of download retries if an HTTP error is encountered. By default 1.
-
-    Returns
-    -------
-    Path
-        The local path to the downloaded file.
-    """
-    casdatap = TapPlus(url=CASDA_TAP_URL, verbose=False)
-    catalogue_table = pypika.Table("casda.catalogue")
-    data_table = (
-        pypika.Table("casda.continuum_component")
-        if is_component
-        else pypika.Table("casda.continuum_island")
-    )
-    adql_query = (
-        pypika.Query.from_(data_table)
-        .select(data_table.star)
-        .join(catalogue_table)
-        .on(data_table.catalogue_id == catalogue_table.id)
-        .where(catalogue_table.filename == catalogue_filename)
-    )
-    adql_query_str = adql_query.get_sql(quote_char=None)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", VOTableChangeWarning)
-        warnings.simplefilter("ignore", VOTableSpecWarning)
-        job = casdatap.launch_job_async(adql_query_str)
-        logger.debug(
-            "TAP query async job for %s completed. Job ID %s. Fetching results ...",
-            catalogue_filename,
-            job.jobid,
-        )
-    # get the catalogue, retrying with exponential backoff if there is an HTTP error
-    try:
-        results = get_casda_tap_result(job, catalogue_filename)
-    except HTTPException:
-        # all download retry attempts failed
-        logger.error(
-            "Reached limit of %d retries for downloading %s job ID %s. Aborting.",
-            MAX_RETRIES,
-            catalogue_filename,
-            job.jobid,
-        )
-        raise
-    output_file = destination / catalogue_filename
-    if output_file.exists():
-        logger.warning("Overwriting existing file %s", output_file)
-    results.write(str(output_file), format="votable", overwrite=True)
-    return output_file
-
-
 @retry(
     retry_on_exception=_retry_if_http_error,
     wait_exponential_multiplier=1000,
@@ -438,14 +422,14 @@ def get_casda_tap_result(
     return results
 
 
-def download_image_data(
+def download_data(
     casda_tap_query_result: Table,
     destination: Path,
     username: str,
     password: str,
     job_size: int = 20,
 ) -> Tuple[List[Path], List[Path]]:
-    """Download and verify image cube data products from CASDA.
+    """Download and verify data products from CASDA.
 
     Parameters
     ----------
@@ -471,27 +455,17 @@ def download_image_data(
     """
     casda = CasdaClass(username, password)
 
-    # ensure only image cubes are being downloaded - catalogues won't work with this method
-    casda_tap_query_result_images = casda_tap_query_result[
-        casda_tap_query_result["dataproduct_type"] == "cube"
-    ]
-    if len(casda_tap_query_result_images) != len(casda_tap_query_result):
-        n_not_images = len(casda_tap_query_result) - len(casda_tap_query_result_images)
-        logger.warning(
-            "%d CASDA query result files are not images and will not be downloaded.",
-            n_not_images,
-        )
-    n_jobs = ceil(len(casda_tap_query_result_images) / job_size)
+    n_jobs = ceil(len(casda_tap_query_result) / job_size)
     logger.info(
         "Splitting %d files into %d CASDA jobs. CASDA will send a confirmation"
         " email for each job to the address associated with your OPAL account.",
-        len(casda_tap_query_result_images),
+        len(casda_tap_query_result),
         n_jobs,
     )
     if n_jobs >= 10:
         logger.info("Brace your inbox!")
 
-    for i, subset in enumerate(chunks(casda_tap_query_result_images, job_size)):
+    for i, subset in enumerate(chunks(casda_tap_query_result, job_size)):
         logger.info(
             "Staging %d files for download for CASDA job #%d of %d ...",
             len(subset),
@@ -500,7 +474,9 @@ def download_image_data(
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", VOTableSpecWarning)
-            url_list = casda.stage_data(subset, verbose=True)
+            url_list = casda.stage_data(
+                subset, verbose=True, service_name="async_service"
+            )
         logger.info("Staging complete for CASDA job #%d of %d.", i + 1, n_jobs)
 
         logger.info("Downloading files for CASDA job #%d of %d ...", i + 1, n_jobs)

@@ -6,7 +6,6 @@ from typing import Optional, Tuple, TextIO, Union
 from urllib.parse import unquote
 
 from astropy.coordinates import SkyCoord, Angle
-from astropy.table import Table
 from astropy.utils.console import human_file_size
 import astropy.units as u
 from astroquery.casda import Casda
@@ -239,65 +238,37 @@ def download(
         logger.warning("No results returned by CASDA.")
         exit()
 
-    image_mask = casda_results["dataproduct_type"] == "cube"
-    casda_results_images = casda_results[image_mask]
-    casda_results_catalogues = casda_results[~image_mask]
-    logger.info(
-        "Query returned %d files. %d images and %d catalogues.",
-        len(casda_results),
-        len(casda_results_images),
-        len(casda_results_catalogues),
-    )
+    logger.info("Query returned %d files.", len(casda_results))
     logger.info(
         "Estimated image download size: %s",
-        human_file_size(casda_results_images["access_estsize"].sum() * u.kilobyte),
+        human_file_size(casda_results["access_estsize"].sum() * u.kilobyte),
     )
     logger.debug(
         "Filenames returned by query: %s", ", ".join(casda_results["filename"].tolist())
     )
-    if not dry_run and len(casda_results_catalogues) > 0:
-        # download catalogues by querying the global CASDA catalogue for each filename with TAP
-        logger.info(
-            "Downloading %d catalogues with TAP ...", len(casda_results_catalogues)
-        )
-        for catalogue in casda_results_catalogues:
-            is_component = (
-                catalogue["dataproduct_subtype"] == "catalogue.continuum.component"
-            )
-            logger.debug("Downloading catalogue %s with TAP ...", catalogue["filename"])
-            _ = casdapy.download_catalogue_data(
-                catalogue["filename"],
-                destination_dir,
-                is_component=is_component,
-                retries=catalogue_retries,
-            )
-            logger.debug("Download completed for %s.", catalogue["filename"])
-        logger.info(
-            "Catalogue downloads completed. Output directory: %s", destination_dir
-        )
 
-    if not dry_run and len(casda_results_images) > 0:
-        # download images by creating an async SODA job on CASDA (astroquery.casda does all this)
+    if not dry_run and len(casda_results) > 0:
+        # download files by creating an async SODA job on CASDA (astroquery.casda does all this)
         # get the user's OPAL account login for image download
         if credentials_file:
             opal_username, opal_password, *_ = credentials_file.read().split("\n")
         else:
             opal_username = input("ATNF OPAL username: ")
             opal_password = getpass.getpass("ATNF OPAL password: ")
-        images_good, images_bad = casda.download_image_data(
-            casda_results_images,
+        files_good, files_bad = casda.download_data(
+            casda_results,
             Path(destination_dir),
             opal_username,
             opal_password,
             job_size,
         )
         logger.info(
-            "All image downloads completed. Checksum verification: %d passed, %d"
+            "All file downloads completed. Checksum verification: %d passed, %d"
             " failed.",
-            len(images_good),
-            len(images_bad),
+            len(files_good),
+            len(files_bad),
         )
-        if len(images_bad) > 0:
+        if len(files_bad) > 0:
             if checksum_fail_mode == "log":
                 fail_log_file = destination_dir / "failed_verification.txt"
                 logger.info(
@@ -305,12 +276,12 @@ def download(
                     fail_log_file,
                 )
                 with fail_log_file.open(mode="w") as f:
-                    for failed_file_path in images_bad:
+                    for failed_file_path in files_bad:
                         # use .name as the fail log file is in the same directory as the images
                         print(failed_file_path.name, file=f)
             elif checksum_fail_mode == "delete":
                 logger.info("Deleting files that failed checksum verification ...")
-                for failed_file_path in images_bad:
+                for failed_file_path in files_bad:
                     failed_file_path.unlink()
                     logger.debug("Deleted %s.", failed_file_path)
     logger.info("Finished!")
