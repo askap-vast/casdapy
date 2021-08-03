@@ -396,11 +396,15 @@ def query(
     logger.info("Querying CASDA TAP server ...")
     logger.debug("ADQL query: %s", adql_query_str)
     casdatap = TapPlus(url=CASDA_TAP_URL, verbose=False)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", VOTableChangeWarning)
-        warnings.simplefilter("ignore", VOTableSpecWarning)
-        job = casdatap.launch_job_async(adql_query_str)
-    r = job.get_results()
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", VOTableChangeWarning)
+            warnings.simplefilter("ignore", VOTableSpecWarning)
+            job = casdatap.launch_job_async(adql_query_str)
+        r = job.get_results()
+    except requests.exceptions.HTTPError as e:
+        logger.error("CASDA returned an HTTP error: %s", e)
+        r = Table()
     return r
 
 
