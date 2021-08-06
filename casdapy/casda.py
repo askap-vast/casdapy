@@ -5,7 +5,7 @@ from http.client import HTTPException
 from math import ceil
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple, ByteString, Iterable, Sequence
+from typing import Dict, List, Optional, Tuple, ByteString, Iterable, Sequence
 from urllib.parse import unquote
 import warnings
 
@@ -148,14 +148,34 @@ class CasdaClass(astroquery.casda.CasdaClass):
         return filenames
 
     # override to add service_name kwarg to allow catalogue downloads in addition to images
-    def stage_data(self, table, verbose=False, service_name="cutout_service"):
+    # and keep track of the original filenames from the TAP query results
+    def stage_data(
+        self, table, verbose=False, service_name="cutout_service"
+    ) -> Dict[str, str]:
+        """Override astroquery.casda.CasdaClass.stage_data to add `service_name` kwarg
+        which allows catalogue downloads. The original implementation in astroquery only
+        supports image downloads. This override also keeps track of the original CASDA
+        filenames which are sometimes mangled due to URL encoding.
+
+        Args:
+            table ([type]): The CASDA TAP query results.
+            verbose (bool, optional): Defaults to False.
+            service_name (str, optional): Defaults to "cutout_service".
+
+        Raises:
+            ValueError: When not authenticated.
+            ValueError: When the CASDA staging job returns a status other than COMPLETED.
+
+        Returns:
+            Dict[str, str]: A dict mapping the CASDA file ID to the download URL.
+        """
         if not self._authenticated:
             raise ValueError(
                 "Credentials must be supplied to download CASDA image data"
             )
 
         if table is None or len(table) == 0:
-            return []
+            return {}
 
         # Use datalink to get authenticated access for each file
         tokens = []
@@ -187,12 +207,13 @@ class CasdaClass(astroquery.casda.CasdaClass):
 
         # Build list of result file urls
         job_details = self._get_job_details_xml(job_url)
-        fileurls = []
+        fileurls = {}
         for result in job_details.find("uws:results", self._uws_ns).findall(
             "uws:result", self._uws_ns
         ):
+            file_id = result.get("id")
             file_location = unquote(result.get("{http://www.w3.org/1999/xlink}href"))
-            fileurls.append(file_location)
+            fileurls[file_id] = file_location
 
         return fileurls
 
@@ -478,7 +499,7 @@ def download_data(
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", VOTableSpecWarning)
-            url_list = casda.stage_data(
+            url_dict = casda.stage_data(
                 subset, verbose=True, service_name="async_service"
             )
         logger.info("Staging complete for CASDA job #%d of %d.", i + 1, n_jobs)
@@ -486,7 +507,7 @@ def download_data(
         logger.info("Downloading files for CASDA job #%d of %d ...", i + 1, n_jobs)
         try:
             downloaded_job_files = download_staged_data_urls(
-                url_list, username, password, destination, casda=casda
+                url_dict, username, password, destination, casda=casda
             )
         except requests.exceptions.ConnectionError:
             logger.error(
@@ -498,12 +519,32 @@ def download_data(
             )
         logger.info("Download complete for CASDA job #%d of %d.", i + 1, n_jobs)
 
+        # rename to filenames provided in TAP query result as sometimes the names are
+        # mangled due to URL encoding
+        for casda_id, downloaded_file in downloaded_job_files.items():
+            is_checksum = casda_id.endswith(".checksum")
+            if is_checksum:
+                casda_id_main_file = casda_id.replace(".checksum", "")
+            else:
+                casda_id_main_file = casda_id
+            casda_filename = str(
+                subset["filename"][subset["obs_publisher_did"] == casda_id_main_file][0]
+            )
+            if is_checksum:
+                casda_filename += ".checksum"
+
+            logger.info("Renaming %s to %s", downloaded_file, casda_filename)
+            # update the stored path using the original casda_id
+            downloaded_job_files[casda_id] = downloaded_file.rename(
+                downloaded_file.with_name(casda_filename)
+            )
+
         # verify the checksums (should be downloaded automatically)
         logger.info(
             "Verifying downloaded files for CASDA job #%d of %d ...", i + 1, n_jobs
         )
         downloaded_valid_files, downloaded_invalid_files = verify_downloaded_data(
-            downloaded_job_files
+            downloaded_job_files.values()
         )
     return downloaded_valid_files, downloaded_invalid_files
 
@@ -515,19 +556,19 @@ def download_data(
     stop_max_attempt_number=MAX_RETRIES,
 )
 def download_staged_data_urls(
-    url_list: List[str],
+    url_dict: Dict[str, str],
     username: str,
     password: str,
     destination: Path,
     casda: Optional[astroquery.casda.CasdaClass] = None,
-) -> List[Path]:
+) -> Dict[str, Path]:
     """Download the staged CASDA file URLs.
 
     Parameters
     ----------
-    url_list : List[str]
-        List of URLs for data files staged by CASDA. i.e. the output of
-        `astroquery.casda.stage_data`.
+    url_dict : Dict[str, str]
+        Dict mapping CASDA file IDs to URLs for data files staged by CASDA. i.e. the
+        output of `CasdaClass.stage_data`.
     username : str
         ATNF OPAL username. Must be the same credentials used to create the CASDA job.
     password : str
@@ -540,15 +581,17 @@ def download_staged_data_urls(
 
     Returns
     -------
-    List[Path]
-        List of `Path` objects for the downloaded files.
+    Dict[str, Path]
+        Dict mapping CASDA file IDs to `Path` objects for the downloaded files.
     """
     if casda is None:
         casda = CasdaClass(username, password)
 
-    downloaded_job_files = [
-        Path(f) for f in casda.download_files(url_list, savedir=str(destination))
-    ]
+    downloaded_job_files = {}
+    for casda_id, url in url_dict.items():
+        file_path = casda.download_files([url], savedir=str(destination))
+        if file_path and len(file_path) > 0:
+            downloaded_job_files[casda_id] = Path(file_path[0])
     return downloaded_job_files
 
 
