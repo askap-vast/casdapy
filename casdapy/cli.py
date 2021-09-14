@@ -99,6 +99,14 @@ def cli(verbose: int = 0):
     ),
 )
 @click.option(
+    "--sbid-file",
+    type=click.File("r"),
+    help=(
+        "Only download data products with SBIDs specified in the given file. Each SBID"
+        " must be on a separate line. If used with --sbid, all given SBIDs are merged."
+    ),
+)
+@click.option(
     "--cone-search",
     nargs=3,
     metavar="RA DEC RADIUS",
@@ -217,12 +225,13 @@ def cli(verbose: int = 0):
 def download(
     project,
     sbid: Tuple[int, ...],
+    sbid_file: Optional[TextIO],
     cone_search,
     image_type: Tuple[str, ...],
     image_pol: Tuple[str, ...],
     catalogue_type: Tuple[str, ...],
-    filenames_file,
-    credentials_file,
+    filenames_file: Optional[TextIO],
+    credentials_file: Optional[TextIO],
     destination_dir: Path,
     job_size,
     catalogue_retries,
@@ -231,9 +240,22 @@ def download(
 ):
     filenames = (
         [line.strip() for line in filenames_file.readlines()]
-        if filenames_file
+        if filenames_file is not None
         else None
     )
+    sbids_from_file = None
+    if sbid_file is not None:
+        try:
+            sbids_from_file = tuple([int(line.strip()) for line in sbid_file.readlines()])
+        except ValueError:
+            logger.error(
+                "Failed to parse SBID file %s. Please ensure each line contains only an"
+                " SBID that may be cast to an int.",
+                sbid_file.name,
+            )
+            exit()
+        sbid = sbid + sbids_from_file
+
     casda_results = casda.query(
         project,
         sbid if len(sbid) > 0 else None,
