@@ -24,8 +24,8 @@ from tqdm.auto import tqdm
 from casdapy._logging import logger
 
 CASDA_TAP_URL = "https://casda.csiro.au/casda_vo_tools/tap"
-CATALOGUE_SUBTYPES = ["catalogue.continuum.island", "catalogue.continuum.component"]
-IMAGE_CUBE_SUBTYPES = [
+CATALOGUE_SUBTYPES = ("catalogue.continuum.island", "catalogue.continuum.component")
+IMAGE_CUBE_SUBTYPES = (
     "cont.background.t0",
     "cont.background.t1",
     "cont.components.t0",
@@ -42,8 +42,8 @@ IMAGE_CUBE_SUBTYPES = [
     "cont.restored.t1",
     "cont.weight.t0",
     "cont.weight.t1",
-]
-IMAGE_CUBE_POLARISATIONS = ["I", "Q", "U", "V"]
+)
+IMAGE_CUBE_POLARISATIONS = ("I", "Q", "U", "V")
 DATAPRODUCT_SUBTYPES = IMAGE_CUBE_SUBTYPES + CATALOGUE_SUBTYPES
 MAX_RETRIES = 30  # max number of retries for functions decorated with @retry
 
@@ -316,11 +316,11 @@ def calculate_casda_checksum(data_file: Path) -> Tuple[int, ByteString, int]:
 
 def query(
     project: Optional[str] = None,
-    sbid: Optional[int] = None,
+    sbid: Optional[Tuple[int, ...]] = None,
     coord: Optional[SkyCoord] = None,
     radius: Optional[Angle] = None,
-    polarisations: List[str] = IMAGE_CUBE_POLARISATIONS,
-    data_products: List[str] = DATAPRODUCT_SUBTYPES,
+    polarisations: Tuple[str, ...] = IMAGE_CUBE_POLARISATIONS,
+    data_products: Tuple[str, ...] = DATAPRODUCT_SUBTYPES,
     filenames: List[str] = None,
 ) -> Table:
     """Query CASDA for matching image cubes and catalogues.
@@ -330,19 +330,19 @@ def query(
     project : Optional[str], optional
         Search for data products with this OPAL project code only, e.g. "AS110" for
         RACS, by default None.
-    sbid : Optional[int], optional
-        Search for data products with this SBID only, by default None.
+    sbid : Optional[Tuple[int, ...]], optional
+        Search for data products with these SBIDs only, by default None.
     coord : Optional[SkyCoord], optional
         Search for data products that intersect with a circle at position `coord` with
         radius `radius`. If specified, must also provide `radius`. By default None.
     radius : Optional[Angle], optional
         Radius for the cone search around `coord`. Must be specified if `coord` is
         given. By default None.
-    polarisations : List[str], optional
+    polarisations : Tuple[str, ...], optional
         Search for image cubes that contain these polarisations only. Filtering
         catalogues by polarisation currently not supported. By default all Stokes
         parameters (I, Q, U, V).
-    data_products : List[str], optional
+    data_products : Tuple[str, ...], optional
         Search for these data product types only. By default all types. See
         `DATAPRODUCT_SUBTYPES`.
     filenames : List[str], optional
@@ -391,7 +391,7 @@ def query(
         )
 
     if sbid:
-        adql_query = adql_query.where(obscore_table.obs_id == str(sbid))
+        adql_query = adql_query.where(obscore_table.obs_id.isin([str(x) for x in sbid]))
 
     if coord is not None and radius is not None:
         adql_query = adql_query.where(

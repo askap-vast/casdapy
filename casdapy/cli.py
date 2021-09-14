@@ -1,5 +1,6 @@
 import getpass
 import logging
+
 # import logging.config
 from pathlib import Path
 from typing import Optional, Tuple, TextIO, Union
@@ -88,7 +89,15 @@ def cli(verbose: int = 0):
 @click.option(
     "--project", type=str, help="Limit results to the given ASKAP OPAL project code."
 )
-@click.option("--sbid", type=int, help="Limit results to the given ASKAP SBID.")
+@click.option(
+    "--sbid",
+    type=int,
+    multiple=True,
+    help=(
+        "Limit results to the given ASKAP SBIDs. Can be given multiple times, e.g."
+        " --sbid 30861 --sbid 30862."
+    ),
+)
 @click.option(
     "--cone-search",
     nargs=3,
@@ -207,11 +216,11 @@ def cli(verbose: int = 0):
 )
 def download(
     project,
-    sbid,
+    sbid: Tuple[int, ...],
     cone_search,
-    image_type,
-    image_pol,
-    catalogue_type,
+    image_type: Tuple[str, ...],
+    image_pol: Tuple[str, ...],
+    catalogue_type: Tuple[str, ...],
     filenames_file,
     credentials_file,
     destination_dir: Path,
@@ -227,7 +236,7 @@ def download(
     )
     casda_results = casda.query(
         project,
-        sbid,
+        sbid if len(sbid) > 0 else None,
         cone_search["coord"],
         cone_search["radius"],
         polarisations=image_pol,
