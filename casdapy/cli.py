@@ -163,6 +163,14 @@ def cli(verbose: int = 0):
     ),
 )
 @click.option(
+    "--filenames-like",
+    type=str,
+    help=(
+        "Limit results to filenames that match the given expression. The value is used"
+        " in a LIKE ADQL expression so '%' may be used as a wildcard. E.g. '%.v2.%'."
+    ),
+)
+@click.option(
     "--credentials-file",
     type=click.File("r"),
     help=(
@@ -223,7 +231,7 @@ def cli(verbose: int = 0):
     ),
 )
 def download(
-    project,
+    project: str,
     sbid: Tuple[int, ...],
     sbid_file: Optional[TextIO],
     cone_search,
@@ -231,6 +239,7 @@ def download(
     image_pol: Tuple[str, ...],
     catalogue_type: Tuple[str, ...],
     filenames_file: Optional[TextIO],
+    filenames_like: str,
     credentials_file: Optional[TextIO],
     destination_dir: Path,
     job_size,
@@ -246,7 +255,9 @@ def download(
     sbids_from_file = None
     if sbid_file is not None:
         try:
-            sbids_from_file = tuple([int(line.strip()) for line in sbid_file.readlines()])
+            sbids_from_file = tuple(
+                [int(line.strip()) for line in sbid_file.readlines()]
+            )
         except ValueError:
             logger.error(
                 "Failed to parse SBID file %s. Please ensure each line contains only an"
@@ -264,6 +275,7 @@ def download(
         polarisations=image_pol,
         data_products=image_type + catalogue_type,
         filenames=filenames,
+        filenames_like=filenames_like,
     )
     if len(casda_results) == 0:
         logger.warning("No results returned by CASDA.")

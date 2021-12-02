@@ -322,6 +322,7 @@ def query(
     polarisations: Tuple[str, ...] = IMAGE_CUBE_POLARISATIONS,
     data_products: Tuple[str, ...] = DATAPRODUCT_SUBTYPES,
     filenames: List[str] = None,
+    filenames_like: Optional[str] = None,
 ) -> Table:
     """Query CASDA for matching image cubes and catalogues.
 
@@ -347,6 +348,9 @@ def query(
         `DATAPRODUCT_SUBTYPES`.
     filenames : List[str], optional
         Download results with the given filenames only.
+    filenames_like : str, optional
+        Download only the results where the filename matches the given ADQL LIKE
+        expression.
 
     Returns
     -------
@@ -404,6 +408,9 @@ def query(
 
     if filenames:
         adql_query = adql_query.where(obscore_table.filename.isin(filenames))
+
+    if filenames_like:
+        adql_query = adql_query.where(obscore_table.filename.like(filenames_like))
 
     adql_query = adql_query.where(obscore_table.dataproduct_subtype.isin(data_products))
     # only the image cubes have pol_states, filtering by polarisation is not directly
