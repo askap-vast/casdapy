@@ -1,12 +1,11 @@
-import binascii
 from functools import partial
 import hashlib
 from http.client import HTTPException
 from math import ceil
 import os
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, ByteString, Iterable, Sequence
-from urllib.parse import unquote
+from pathlib import Path, PurePath
+from typing import Dict, List, Optional, Tuple, Iterable, Sequence
+from urllib.parse import unquote, urlparse
 import warnings
 
 from astropy.coordinates import SkyCoord, Angle
@@ -56,7 +55,8 @@ class CasdaClass(astroquery.casda.CasdaClass):
     def download_files(self, urls, savedir=None):
         filenames = []
         for url in urls:
-            local_filename = url.split("/")[-1]
+            url_path = PurePath(urlparse(url).path)
+            local_filename = url_path.name
             if os.name == "nt":
                 # Windows doesn't allow special characters in filenames like
                 # ":" so replace them with an underscore
@@ -262,28 +262,15 @@ def verify_casda_checksum(data_file: Path, checksum_file: Path = None) -> bool:
     bool
         The calculated checksum for `data_file` matches the checksum file.
     """
-    data_crc, data_digest, data_file_size = calculate_casda_checksum(data_file)
+    data_digest = calculate_casda_checksum(data_file)
     if checksum_file is None:
         checksum_file = Path(data_file.parent, data_file.name + ".checksum")
-    (
-        _checksum_crc,
-        _checksum_digest,
-        _checksum_file_size,
-    ) = checksum_file.read_text().split()
+    checksum_digest = checksum_file.read_text()
 
-    # convert checksum crc and size from hex to int, decode binary digest
-    checksum_crc = int(_checksum_crc, 16)
-    checksum_digest = binascii.unhexlify(_checksum_digest)
-    checksum_file_size = int(_checksum_file_size, 16)
-
-    return (
-        data_crc == checksum_crc
-        and data_digest == checksum_digest
-        and data_file_size == checksum_file_size
-    )
+    return data_digest == checksum_digest
 
 
-def calculate_casda_checksum(data_file: Path) -> Tuple[int, ByteString, int]:
+def calculate_casda_checksum(data_file: Path) -> str:
     """Calculate the CASDA checksum for a data file.
 
     Parameters
@@ -296,22 +283,13 @@ def calculate_casda_checksum(data_file: Path) -> Tuple[int, ByteString, int]:
     Tuple[int, ByteString, int]
         The CASDA checksum: (CRC, SHA-1 digest, file size in bytes)
     """
-    crc = 0
-    sha1 = hashlib.sha1()
-    file_size = 0  # 0x00000000
+    md5 = hashlib.md5()
     chunk_size = 65536
 
     with data_file.open(mode="rb") as fin:
         for chunk in iter(partial(fin.read, chunk_size), b""):
-            crc = binascii.crc32(chunk, crc)
-            sha1.update(chunk)
-            file_size += len(chunk)
-
-    if crc < 0:
-        crc = crc + (1 << 32)
-
-    # sys.stdout.write(format(crc, '08;x') + " " + sha1.hexdigest() + " " + format(fsize, 'x'))
-    return crc, sha1.digest(), file_size
+            md5.update(chunk)
+    return md5.hexdigest()
 
 
 def query(
