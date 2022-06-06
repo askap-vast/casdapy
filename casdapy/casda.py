@@ -1,10 +1,11 @@
+import binascii
 from functools import partial
 import hashlib
 from http.client import HTTPException
 from math import ceil
 import os
 from pathlib import Path, PurePath
-from typing import Dict, List, Optional, Tuple, Iterable, Sequence
+from typing import ByteString, Dict, List, Optional, Tuple, Iterable, Sequence
 from urllib.parse import unquote, urlparse
 import warnings
 
@@ -262,15 +263,61 @@ def verify_casda_checksum(data_file: Path, checksum_file: Path = None) -> bool:
     bool
         The calculated checksum for `data_file` matches the checksum file.
     """
-    data_digest = calculate_casda_checksum(data_file)
+    verified: bool = False
     if checksum_file is None:
         checksum_file = Path(data_file.parent, data_file.name + ".checksum")
-    checksum_digest = checksum_file.read_text()
+    checksum = checksum_file.read_text().split()
+    if len(checksum) == 3:
+        # old CASDA style 3-part checksum
+        # convert checksum crc and size from hex to int, decode binary digest
+        checksum_crc = int(checksum[0], 16)
+        checksum_digest = binascii.unhexlify(checksum[1])
+        checksum_file_size = int(checksum[2], 16)
+        data_crc, data_digest, data_file_size = calculate_casda_checksum_3part(data_file)
+        verified = (
+            data_crc == checksum_crc
+            and data_digest == checksum_digest
+            and data_file_size == checksum_file_size
+        )
+    else:
+        # new style MD5 checksum
+        verified = calculate_casda_checksum_md5(data_file) == checksum
+    return verified
 
-    return data_digest == checksum_digest
+
+def calculate_casda_checksum_3part(data_file: Path) -> Tuple[int, ByteString, int]:
+    """Calculate the CASDA checksum for a data file. The 3-part checksum contains the
+    CRC, SHA-1 hash, and the file size in bytes. This checksum format was used in the
+    original CASDA storage backend and may still be in use for some older files.
+
+    Parameters
+    ----------
+    data_file : Path
+        Data file for which to calculate the CASDA checksum.
+
+    Returns
+    -------
+    Union[str, Tuple[int, ByteString, int]]
+        The CASDA checksum for the data file as a tuple containing (CRC, SHA-1 digest,
+        file size in bytes).
+    """
+    crc = 0
+    sha1 = hashlib.sha1()
+    file_size = 0  # 0x00000000
+    chunk_size = 65536
+
+    with data_file.open(mode="rb") as fin:
+        for chunk in iter(partial(fin.read, chunk_size), b""):
+            crc = binascii.crc32(chunk, crc)
+            sha1.update(chunk)
+            file_size += len(chunk)
+
+    if crc < 0:
+        crc = crc + (1 << 32)
+    return crc, sha1.digest(), file_size
 
 
-def calculate_casda_checksum(data_file: Path) -> str:
+def calculate_casda_checksum_md5(data_file: Path) -> str:
     """Calculate the CASDA checksum for a data file.
 
     Parameters
@@ -280,16 +327,16 @@ def calculate_casda_checksum(data_file: Path) -> str:
 
     Returns
     -------
-    Tuple[int, ByteString, int]
-        The CASDA checksum: (CRC, SHA-1 digest, file size in bytes)
+    str
+        The CASDA checksum, an MD5 hash of the data file.
     """
-    md5 = hashlib.md5()
+    md5_hash = hashlib.md5()
     chunk_size = 65536
 
     with data_file.open(mode="rb") as fin:
         for chunk in iter(partial(fin.read, chunk_size), b""):
-            md5.update(chunk)
-    return md5.hexdigest()
+            md5_hash.update(chunk)
+    return md5_hash.hexdigest()
 
 
 def query(

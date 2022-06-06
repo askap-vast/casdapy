@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "casdapy"
-version = "0.4.0"
+version = "0.4.1"
 description = "Query and download images and catalogues from the CSIRO ASKAP Science Data Archive (CASDA)."
 authors = ["Andrew O'Brien <obrienan@uwm.edu>"]
 license = "MIT"
