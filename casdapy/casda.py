@@ -270,6 +270,7 @@ def verify_casda_checksum(data_file: Path, checksum_file: Path = None) -> bool:
     if len(checksum) == 3:
         # old CASDA style 3-part checksum
         # convert checksum crc and size from hex to int, decode binary digest
+        logger.debug("3-part CASDA checksum detected: %s", checksum)
         checksum_crc = int(checksum[0], 16)
         checksum_digest = binascii.unhexlify(checksum[1])
         checksum_file_size = int(checksum[2], 16)
@@ -281,7 +282,8 @@ def verify_casda_checksum(data_file: Path, checksum_file: Path = None) -> bool:
         )
     else:
         # new style MD5 checksum
-        verified = calculate_casda_checksum_md5(data_file) == checksum
+        logger.debug("MD5 CASDA checksum detected: %s", checksum[0])
+        verified = calculate_casda_checksum_md5(data_file) == checksum[0]
     return verified
 
 
