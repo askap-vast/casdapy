@@ -230,6 +230,15 @@ def cli(verbose: int = 0):
         " *would* be downloaded. Defaults to False."
     ),
 )
+@click.option(
+    "--query-name",
+    type=str,
+    help=(
+        "If specified, the CASDA TAP query results will be saved to disk as a VOTable"
+        " using the given filename within --destination-dir. Existing files will be"
+        " overwritten."
+    ),
+)
 def download(
     project: str,
     sbid: Tuple[int, ...],
@@ -242,10 +251,11 @@ def download(
     filenames_like: str,
     credentials_file: Optional[TextIO],
     destination_dir: Path,
-    job_size,
-    catalogue_retries,
-    checksum_fail_mode,
-    dry_run,
+    job_size: int,
+    catalogue_retries: int,
+    checksum_fail_mode: str,
+    dry_run: bool,
+    query_name: Optional[str],
 ):
     filenames = (
         [line.strip() for line in filenames_file.readlines()]
@@ -289,6 +299,11 @@ def download(
     logger.debug(
         "Filenames returned by query: %s", ", ".join(casda_results["filename"].tolist())
     )
+    # save CASDA query results to disk
+    if query_name is not None:
+        query_results_path = Path(destination_dir) / f"{query_name}.vot"
+        logger.info("Writing CASDA TAP query results to disk: %s", query_results_path)
+        casda_results.write(query_results_path, format="votable", overwrite=True)
 
     if not dry_run and len(casda_results) > 0:
         # download files by creating an async SODA job on CASDA (astroquery.casda does all this)
