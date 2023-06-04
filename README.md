@@ -32,8 +32,7 @@ pip install git+https://github.com/askap-vast/casdapy.git
 
 An executable script named `casdapy` is installed with the package. Run it with `--help` to see usage details.
 
-```bash
-$ casdapy --help
+```
 Usage: casdapy [OPTIONS] COMMAND [ARGS]...
 
 Options:
