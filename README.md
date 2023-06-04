@@ -37,15 +37,19 @@ $ casdapy --help
 Usage: casdapy [OPTIONS] COMMAND [ARGS]...
 
 Options:
-  --verbose  Show more logging information. Useful for debugging. Defaults to
-             False.
+  -v, --verbose  Show more detailed logging information which is useful for
+                 debugging. Can be used multiple times to increase the level
+                 of verbosity. i.e. -v will turn on debug logging for casdapy
+                 logging; -vv will also turn on debug logging for all HTTP
+                 requests.
 
-  --help     Show this message and exit.
+  --help         Show this message and exit.
 
 Commands:
-  download  Query CASDA and download results.
-  retry     Download files from an existing CASDA job.
-  verify    Verify CASDA download checksums.
+  download      Query CASDA and download results.
+  download-vis  Query CASDA for visibilities and download results.
+  retry         Download files from an existing CASDA job.
+  verify        Verify CASDA download checksums.
 ```
 
 Note that `--verbose` is an option for the parent `casdapy` command. To turn on verbose logging, pass it as an option to `casdapy`, not the subcommand.
@@ -55,6 +59,10 @@ Note that `--verbose` is an option for the parent `casdapy` command. To turn on 
 #### download
 
 Search for images and catalogues on CASDA that match various search criteria (e.g. image polarisation, SBID number, cone search) and downloads the results. Will split the data download into several CASDA jobs for large result sets. Run `casdapy download --help` for more details.
+
+#### download-vis
+
+Search for visibilities on CASDA that match various search criteria (e.g. project, SBID, field/beam pair) and downloads the results. Will split the data download into several CASDA jobs for large result sets. Run `casdapy download-vis --help` for more details.
 
 #### retry
 
@@ -71,6 +79,12 @@ Download the component catalogue, island catalogue, restored Stokes I image, and
 ```bash
 casdapy --verbose download --sbid 11427 --image-type cont.restored.t0 --image-type cont.noise.t0 --image-pol I \
 --catalogue-type catalogue.continuum.component --catalogue-type catalogue.continuum.island
+```
+
+Download the beam 33 visibilities from all observations of fields named like 1806-25 (e.g. VAST_1806-25, RACS_1806-25).
+
+```bash
+casdapy -v download-vis --beam=33 --field-like=1806-25
 ```
 
 ## Use as a library
