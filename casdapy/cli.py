@@ -345,6 +345,273 @@ def download(
     logger.info("Finished!")
 
 
+@click.group()
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help=(
+        "Show more detailed logging information which is useful for debugging. Can be"
+        " used multiple times to increase the level of verbosity. i.e. -v will turn on"
+        " debug logging for casdapy logging; -vv will also turn on debug logging for"
+        " all HTTP requests."
+    ),
+)
+def cli(verbose: int = 0):
+    if verbose > 0:
+        logger.setLevel(logging.DEBUG)
+    if verbose > 1:
+        debug_http_on()
+
+
+@cli.command(
+    help=(
+        "Query CASDA for files matching various search criteria and download the"
+        " results."
+    ),
+    short_help="Query CASDA and download results.",
+)
+@click.option(
+    "--project", type=str, help="Limit results to the given ASKAP OPAL project code."
+)
+@click.option(
+    "--sbid",
+    type=int,
+    multiple=True,
+    help=(
+        "Limit results to the given ASKAP SBIDs. Can be given multiple times, e.g."
+        " --sbid 30861 --sbid 30862."
+    ),
+)
+@click.option(
+    "--sbid-file",
+    type=click.File("r"),
+    help=(
+        "Only download data products with SBIDs specified in the given file. Each SBID"
+        " must be on a separate line. If used with --sbid, all given SBIDs are merged."
+    ),
+)
+@click.option(
+    "--beam",
+    type=int,
+    multiple=True,
+    help=(
+        "Only download data products from the specified beams. Each beam must"
+        " be accompanied by a field passed to --fieldname-like"
+    ),
+)
+@click.option(
+    "--field-like",
+    type=str,
+    multiple=True,
+    help=(
+        "Only download data products from the specified fields. Each field must"
+        " be accompanied by a beam passed to --beam. Field names can be partial"
+        " (e.g. '1806-25' will return results from VAST_1806-25 and RACS_1806-25)"
+        " and can also use standard ADQL wildcards (i.e. '%' replaces any string"
+        " and '_' replaces any character)."
+    ),
+)
+@click.option(
+    "--field-file",
+    type=click.File("r"),
+    help=(
+        "A file containing field name and beam pairs (one pair per line"
+        " separated by a comma) to download data from. Field names can be partial"
+        " (e.g. '1806-25' will return results from VAST_1806-25 and RACS_1806-25)"
+        " and can also use standard ADQL wildcards (i.e. '%' replaces any string"
+        " and '_' replaces any character)."
+    ),
+)
+@click.option(
+    "--credentials-file",
+    type=click.File("r"),
+    help=(
+        "Read ATNF OPAL account credentials from a file containing the username"
+        " and password on separate lines. If not supplied, user will be prompted to"
+        " enter a username and password interactively."
+    ),
+)
+@click.option(
+    "--destination-dir",
+    type=ClickPathPath(exists=True, file_okay=False, writable=True),
+    help=(
+        "Directory to save downloaded images. Existing files that match query results"
+        " will be overwritten. Defaults to current directory."
+    ),
+    default=".",
+)
+@click.option(
+    "--job-size",
+    type=int,
+    default=20,
+    metavar="N",
+    help=(
+        "Ask CASDA to split the download into several jobs, each containing a maximum"
+        " of N files. Note the actual number of returned files will be 2*N as CASDA"
+        " always provides a small .checksum file for each requested file. Defaults"
+        " to 20."
+    ),
+)
+@click.option(
+    "--catalogue-retries",
+    type=int,
+    default=5,
+    metavar="N",
+    help=(
+        "If an error occurs when downloading a requested catalogue, retry the download"
+        " a maximum of N times with exponential backoff."
+    ),
+)
+@click.option(
+    "--checksum-fail-mode",
+    type=click.Choice(["log", "delete"]),
+    help=(
+        'What to do with image files that fail checksum verification. "log" will write'
+        " the filenames of the bad files to a file named failed_verification.txt in the"
+        " location specified by `--destination-dir`. Existing contents will be"
+        ' overwritten. "delete" will delete the files. Default is to do nothing, but'
+        " files that fail verification will still be logged in the main log with level"
+        " ERROR."
+    ),
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help=(
+        "Don't download any files, only perform query steps and report which files"
+        " *would* be downloaded. Defaults to False."
+    ),
+)
+@click.option(
+    "--query-name",
+    type=str,
+    help=(
+        "If specified, the CASDA TAP query results will be saved to disk as a VOTable"
+        " using the given filename within --destination-dir. Existing files will be"
+        " overwritten."
+    ),
+)
+def download_vis(
+    project: str,
+    sbid: Tuple[int, ...],
+    sbid_file: Optional[TextIO],
+    beam: Optional[Tuple[int, str]],
+    field_like: Optional[str],
+    field_file: Optional[TextIO],
+    credentials_file: Optional[TextIO],
+    destination_dir: Path,
+    job_size: int,
+    catalogue_retries: int,
+    checksum_fail_mode: str,
+    dry_run: bool,
+    query_name: Optional[str],
+):
+
+    sbids_from_file = None
+    if sbid_file is not None:
+        try:
+            sbids_from_file = tuple(
+                [int(line.strip()) for line in sbid_file.readlines()]
+            )
+        except ValueError:
+            logger.error(
+                "Failed to parse SBID file %s. Please ensure each line contains only an"
+                " SBID that may be cast to an int.",
+                sbid_file.name,
+            )
+            exit()
+        sbid = sbid + sbids_from_file
+
+    
+    fields_from_file = None
+    beams_from_file = None
+    if field_file is not None:
+        fields_from_file = []
+        beams_from_file = []
+        try:
+            for line in field_file.readlines():
+                vals = line.strip().split(',')
+                if len(vals) != 2:
+                    raise ValueError(f"Failed to parse field/beam pair from "
+                                     "file {fieldname_file.name}. Offending "
+                                     "line is {line}.")
+                fields_from_file.append(vals[0])
+                beams_from_file.append(vals[1])
+        except ValueError:
+            logger.error(
+                "Failed to parse field/beam pairs file %s. Please ensure each "
+                "line contains only a field/beam pair separated by a comma.",
+                fieldname_file.name,
+            )
+            exit()
+        field_like = field_like + tuple(fields_from_file)
+        beam = beam + tuple(beams_from_file)
+    
+    casda_results = casda.query_visibilities(
+        project,
+        sbid if len(sbid) > 0 else None,
+        beam if len(beam) > 0 else None,
+        field_like if len(field_like) > 0 else None,
+    )
+    if len(casda_results) == 0:
+        logger.warning("No results returned by CASDA.")
+        exit()
+
+    logger.info("Query returned %d files.", len(casda_results))
+    logger.info(
+        "Estimated image download size: %s",
+        human_file_size(casda_results["access_estsize"].sum() * u.kilobyte),
+    )
+    logger.debug(
+        "Filenames returned by query: %s", ", ".join(casda_results["filename"].tolist())
+    )
+    # save CASDA query results to disk
+    if query_name is not None:
+        query_results_path = Path(destination_dir) / f"{query_name}.vot"
+        logger.info("Writing CASDA TAP query results to disk: %s", query_results_path)
+        casda_results.write(query_results_path, format="votable", overwrite=True)
+
+    if not dry_run and len(casda_results) > 0:
+        # download files by creating an async SODA job on CASDA (astroquery.casda does all this)
+        # get the user's OPAL account login for image download
+        if credentials_file:
+            opal_username, opal_password, *_ = credentials_file.read().split("\n")
+        else:
+            opal_username = input("ATNF OPAL username: ")
+            opal_password = getpass.getpass("ATNF OPAL password: ")
+        files_good, files_bad = casda.download_data(
+            casda_results,
+            Path(destination_dir),
+            opal_username,
+            opal_password,
+            job_size,
+        )
+        logger.info(
+            "All file downloads completed. Checksum verification: %d passed, %d"
+            " failed.",
+            len(files_good),
+            len(files_bad),
+        )
+        if len(files_bad) > 0:
+            if checksum_fail_mode == "log":
+                fail_log_file = destination_dir / "failed_verification.txt"
+                logger.info(
+                    "Writing filenames that failed checksum verification to %s ...",
+                    fail_log_file,
+                )
+                with fail_log_file.open(mode="w") as f:
+                    for failed_file_path in files_bad:
+                        # use .name as the fail log file is in the same directory as the images
+                        print(failed_file_path.name, file=f)
+            elif checksum_fail_mode == "delete":
+                logger.info("Deleting files that failed checksum verification ...")
+                for failed_file_path in files_bad:
+                    failed_file_path.unlink()
+                    logger.debug("Deleted %s.", failed_file_path)
+    logger.info("Finished!")
+
+
 @cli.command(
     help=(
         "Verify files downloaded from CASDA by calculating their checksums and"
