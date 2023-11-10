@@ -464,6 +464,8 @@ def query(
 
 def query_visibilities(
     project: Optional[str] = None,
+    coord: Optional[SkyCoord] = None,
+    radius: Optional[Angle] = None,
     sbid: Optional[Tuple[int, ...]] = None,
     beams: Optional[Union[List[str],List[int]]] = None,
     fieldnames_like: Optional[List[str]] = None,
@@ -509,8 +511,12 @@ def query_visibilities(
     # validate args
     if (beams is not None) ^ (fieldnames_like is not None):
         raise ValueError("Both a field and beam must be given, or neither.")
-    if len(beams) != len(fieldnames_like):
+
+    if (beams is not None) and (len(beams) != len(fieldnames_like)):
         raise ValueError(f"Number of beams {len(beams)} must match the number of fields {len(fieldnames_like)}")
+    
+    if (coord is not None) ^ (radius is not None):
+        raise ValueError("Both a coord and radius must be given, or neither.")
        
     obscore_table = pypika.Table("ivoa.obscore")
     adql_query: pypika.queries.QueryBuilder = pypika.Query.from_(obscore_table).select(
@@ -520,6 +526,14 @@ def query_visibilities(
     # Only query visibilities
     adql_query = adql_query.where(obscore_table.dataproduct_type == 'visibility')
     
+    if coord is not None and radius is not None:
+        adql_query = adql_query.where(
+            1
+            == AdqlIntersects(
+                AdqlCircle("ICRS", coord.ra.deg, coord.dec.deg, radius.deg),
+                obscore_table.s_region,
+            )
+        )
 
     if project:
         project_table = pypika.Table("casda.project")
@@ -532,12 +546,13 @@ def query_visibilities(
     if sbid:
         adql_query = adql_query.where(obscore_table.obs_id.isin([str(x) for x in sbid]))
 
-    beam_field_pairs = []
-    for beam, field_name in zip(beams, fieldnames_like):
-        query = obscore_table.filename.like(f"%{field_name}%beam{beam:02d}%")
-        beam_field_pairs.append(query)
+    if beams is not None:
+        beam_field_pairs = []
+        for beam, field_name in zip(beams, fieldnames_like):
+            query = obscore_table.filename.like(f"%{field_name}%beam{beam:02d}%")
+            beam_field_pairs.append(query)
 
-    adql_query = adql_query.where(pypika.Criterion.any(beam_field_pairs))
+        adql_query = adql_query.where(pypika.Criterion.any(beam_field_pairs))
 
     adql_query_str = adql_query.get_sql(quote_char=None)
     logger.info("Querying CASDA TAP server ...")
