@@ -534,7 +534,7 @@ def query_visibilities(
 
     beam_field_pairs = []
     for beam, field_name in zip(beams, fieldnames_like):
-        query = obscore_table.filename.like(f"%{field_name}%beam{beam}%")
+        query = obscore_table.filename.like(f"%{field_name}%beam{beam:02d}%")
         beam_field_pairs.append(query)
 
     adql_query = adql_query.where(pypika.Criterion.any(beam_field_pairs))
