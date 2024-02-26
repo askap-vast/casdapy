@@ -345,34 +345,30 @@ def download(
     logger.info("Finished!")
 
 
-@click.group()
-@click.option(
-    "-v",
-    "--verbose",
-    count=True,
-    help=(
-        "Show more detailed logging information which is useful for debugging. Can be"
-        " used multiple times to increase the level of verbosity. i.e. -v will turn on"
-        " debug logging for casdapy logging; -vv will also turn on debug logging for"
-        " all HTTP requests."
-    ),
-)
-def cli(verbose: int = 0):
-    if verbose > 0:
-        logger.setLevel(logging.DEBUG)
-    if verbose > 1:
-        debug_http_on()
-
-
 @cli.command(
     help=(
-        "Query CASDA for files matching various search criteria and download the"
-        " results."
+        "Query CASDA for visibility measurement sets from a set of beams and"
+        " fields, and download the results."
     ),
-    short_help="Query CASDA and download results.",
+    short_help="Query CASDA for visibilities and download results.",
 )
 @click.option(
     "--project", type=str, help="Limit results to the given ASKAP OPAL project code."
+)
+@click.option(
+    "--cone-search",
+    nargs=3,
+    metavar="RA DEC RADIUS",
+    help=(
+        "Perform a cone search around (RA, DEC) with RADIUS and return results that"
+        " intersect with this region. RA and DEC must be given in a format parseable by"
+        " `astropy.coordinate.SkyCoord`, e.g. 23h30m00.00s -55d00m00.00s, or decimal"
+        " degrees 352.5 -55.0. Note that sexigesimal coordinates must be delimited with"
+        " hms/dms, not colons, as the latter has ambiguous units. RADIUS must be given"
+        " in a format parseable by `astropy.coordinate.Angle`, e.g. 15arcsec,"
+        " 1.5arcmin, etc. If no unit is given, the value will be interpreted in arcmin."
+    ),
+    callback=process_cone_search_args,
 )
 @click.option(
     "--sbid",
@@ -494,6 +490,7 @@ def cli(verbose: int = 0):
 )
 def download_vis(
     project: str,
+    cone_search,
     sbid: Tuple[int, ...],
     sbid_file: Optional[TextIO],
     beam: Optional[Tuple[int, str]],
@@ -550,6 +547,8 @@ def download_vis(
     
     casda_results = casda.query_visibilities(
         project,
+        cone_search["coord"],
+        cone_search["radius"],
         sbid if len(sbid) > 0 else None,
         beam if len(beam) > 0 else None,
         field_like if len(field_like) > 0 else None,
