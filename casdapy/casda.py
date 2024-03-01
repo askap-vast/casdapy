@@ -544,7 +544,7 @@ def query_visibilities(
         )
 
     if sbid:
-        adql_query = adql_query.where(obscore_table.obs_id.isin([str(x) for x in sbid]))
+        adql_query = adql_query.where(obscore_table.obs_id.isin([f"ASKAP-{x}" for x in sbid]))
 
     if beams is not None:
         beam_field_pairs = []
