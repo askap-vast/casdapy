@@ -422,7 +422,7 @@ def query(
         )
 
     if sbid:
-        adql_query = adql_query.where(obscore_table.obs_id.isin([str(x) for x in sbid]))
+        adql_query = adql_query.where(obscore_table.obs_id.isin([f"ASKAP-{x}" for x in sbid]))
 
     if coord is not None and radius is not None:
         adql_query = adql_query.where(
