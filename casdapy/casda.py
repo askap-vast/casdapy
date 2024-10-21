@@ -556,7 +556,7 @@ def query_visibilities(
 
     adql_query_str = adql_query.get_sql(quote_char=None)
     logger.info("Querying CASDA TAP server ...")
-    logger.debug("ADQL query: %s", adql_query_str)
+    logger.info("ADQL query: %s", adql_query_str)
     casdatap = TapPlus(url=CASDA_TAP_URL, verbose=False)
     try:
         with warnings.catch_warnings():

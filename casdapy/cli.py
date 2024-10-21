@@ -45,6 +45,7 @@ def _get_auth(credentials_file: Optional[Union[Path, TextIO]]) -> Tuple[str, str
 
     Returns
     -------
+    
     Tuple[str, str]
         ATNF OPAL username, password.
     """
@@ -559,7 +560,7 @@ def download_vis(
 
     logger.info("Query returned %d files.", len(casda_results))
     logger.info(
-        "Estimated image download size: %s",
+        "Estimated visibility download size: %s",
         human_file_size(casda_results["access_estsize"].sum() * u.kilobyte),
     )
     logger.debug(
