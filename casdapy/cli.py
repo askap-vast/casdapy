@@ -25,7 +25,7 @@ class ClickPathPath(click.Path):
 
 
 def process_cone_search_args(ctx, param, value):
-    if len(value) == 0:
+    if value is None or len(value) == 0:
         return {"coord": None, "radius": None}
     ra, dec, radius = value
     coord = SkyCoord(ra=ra, dec=dec, unit="deg")
