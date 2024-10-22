@@ -239,6 +239,14 @@ def cli(verbose: int = 0):
         " overwritten."
     ),
 )
+@click.option(
+    "--released-only",
+    is_flag=True,
+    help=(
+        "Filter out all unreleased data. Note: this will filter out "
+        "unreleased data that the user has access to."
+    ),
+)
 def download(
     project: str,
     sbid: Tuple[int, ...],
@@ -256,6 +264,7 @@ def download(
     checksum_fail_mode: str,
     dry_run: bool,
     query_name: Optional[str],
+    released_only: bool,
 ):
     filenames = (
         [line.strip() for line in filenames_file.readlines()]
@@ -292,6 +301,16 @@ def download(
         exit()
 
     logger.info("Query returned %d files.", len(casda_results))
+    
+    if released_only:
+        casda_results = Casda.filter_out_unreleased(casda_results)
+        logger.info("Filtering out unreleased files...")
+        if len(casda_results) == 0:
+            logger.warning("Query did not return any released data")
+            exit()
+        else:
+            logger.info("Query returned %d files.", len(casda_results))
+    
     logger.info(
         "Estimated image download size: %s",
         human_file_size(casda_results["access_estsize"].sum() * u.kilobyte),
