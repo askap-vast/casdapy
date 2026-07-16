@@ -213,8 +213,10 @@ class CasdaClass(astroquery.casda.CasdaClass):
             "uws:result", self._uws_ns
         ):
             file_id = result.get("id")
-            file_location = unquote(result.get("{http://www.w3.org/1999/xlink}href"))
-            fileurls[file_id] = file_location
+            #file_location = unquote(result.get("{http://www.w3.org/1999/xlink}href"))
+            #fileurls[file_id] = file_location
+            raw_href = result.get("{http://www.w3.org/1999/xlink}href")
+            fileurls[file_id] = raw_href
 
         return fileurls
 
