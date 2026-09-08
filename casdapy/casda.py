@@ -18,6 +18,7 @@ import astroquery.casda
 from astroquery.utils.tap.core import TapPlus
 import pypika
 import requests.exceptions
+import requests
 from retrying import retry
 from tqdm.auto import tqdm
 
@@ -192,7 +193,12 @@ class CasdaClass(astroquery.casda.CasdaClass):
             tokens.append(id_token)
 
         # Create job to stage all files
-        job_url = self._create_soda_job(tokens, soda_url=soda_url)
+        try:
+            job_url = self._create_soda_job(tokens, soda_url=soda_url)
+        except requests.exceptions.HTTPError as e:
+            print(e.response.status_code)
+            print(e.response.text)
+            exit()
         if verbose:
             logger.info("Created data staging job " + job_url)
 
